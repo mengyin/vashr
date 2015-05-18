@@ -1,0 +1,19 @@
+Package: vash
+Maintainer: Matthew Stephens <mstephens@uchicago.edu>
+Author: Mengyin Lu
+Type: Package
+Title: Adaptive shrinkage
+Version: 0.1
+Date: 2014-10-01
+Description: Requires the executables samtools, wigToBigWig, bigWigInfo, and
+    bedToBigBed to be in the USER's path.
+License: GPL-3
+Depends:
+    Rcpp (>= 0.10.4),
+    ashr,
+    gaussquad,
+    SQUAREM
+Suggests:
+    rhdf5
+LinkingTo: Rcpp
+Packaged: 2014-10-01 20:44:42 UTC; mengyin
