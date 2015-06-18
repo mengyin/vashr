@@ -351,6 +351,9 @@ vash = function(sehat,df,
   completeobs = (!is.na(sehat))
   n=sum(completeobs)
   
+  # If some standard errors are almost 0, add a small pseudocount to prevent numerical errors
+  sehat[sehat==0] = min(min(sehat[sehat>0]),1e-6)
+  
   if(n==0){
     stop("Error: all input values are missing")
   }  
