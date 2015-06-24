@@ -245,6 +245,8 @@ loglike.se.ac = function(params,n,k,v,sehat,pi,unimodal){
                                  -(v/2)*log(outer(v/2*sehat^2,c*modalpha.vec,FUN="+")))
   #classprob=pimat/rowSums(pimat)
   logl = sum(log(rowSums(pimat)))
+  logl = min(logl,1e200)
+  logl = max(logl,-1e200)
   return(-logl)
 }
 
@@ -271,7 +273,10 @@ gradloglike.se.ac=function(params,n,k,v,sehat,pi,unimodal){
   
   grad.a=-alpha.vec*sum(log(c)+log(modalpha.vec)+alpha.vec/modalpha.vec-digamma(alpha.vec)+digamma(alpha.vec+v/2)
                         -c*(alpha.vec+v/2)/(c*modalpha.vec+v/2*sehat^2)-log(c*modalpha.vec+v/2*sehat^2))
-  return(c(grad.c,grad.a))
+  res = c(grad.c,grad.a)
+  res = pmin(res,1e200)
+  res = pmax(res,-1e200)
+  return(res)
 }
 
 #compute posterior shape (alpha1) and rate (beta1)
