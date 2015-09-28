@@ -24,7 +24,7 @@ getA = function(n,k,v,alpha.vec,modalpha.vec,sehat){
 #(prior is used to encourage results towards smallest value of sigma when
 #likelihood is flat)
 #' Title 
-EMest_se = function(sehat,g,prior,maxiter=5000, v,unimodal, singlecomp){ 
+EMest_se = function(sehat,g,prior,maxiter=5000, v,unimodal, singlecomp, estpriormode){ 
   
   pi.init = g$pi
   k = ncomp(g)
@@ -38,7 +38,7 @@ EMest_se = function(sehat,g,prior,maxiter=5000, v,unimodal, singlecomp){
   }
   c.init = max(c.init,1e-5)
   
-  EMfit = IGmixEM(sehat, v, c.init, g$alpha, pi.init, prior, unimodal,singlecomp, tol, maxiter)
+  EMfit = IGmixEM(sehat, v, c.init, g$alpha, pi.init, prior, unimodal,singlecomp, estpriormode, tol, maxiter)
   
   loglik = EMfit$B # actually return log lower bound not log-likelihood! 
   converged = EMfit$converged
@@ -61,7 +61,7 @@ EMest_se = function(sehat,g,prior,maxiter=5000, v,unimodal, singlecomp){
 
 
 #' Title
-IGmixEM = function(sehat, v, c.init, alpha.vec, pi.init, prior, unimodal,singlecomp, tol, maxiter){
+IGmixEM = function(sehat, v, c.init, alpha.vec, pi.init, prior, unimodal,singlecomp, estpriormode, tol, maxiter){
   q = length(pi.init)
   n = length(sehat)
   
@@ -73,14 +73,25 @@ IGmixEM = function(sehat, v, c.init, alpha.vec, pi.init, prior, unimodal,singlec
   
   
   if(singlecomp==FALSE){
-    params.init=c(log(c.init),pi.init)
-    A=getA(n=n,k=q,v,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,sehat=sehat)
+    if(estpriormode==TRUE){
+      params.init=c(log(c.init),pi.init)
+      A=getA(n=n,k=q,v,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,sehat=sehat)
+      
+      res = squarem(par=params.init,fixptfn=fixpoint_se, objfn=penloglik_se, 
+                    A=A,n=n,k=q,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,v=v,sehat=sehat,prior=prior,
+                    control=list(maxiter=maxiter,tol=tol))
+      return(list(chat = exp(res$par[1]), pihat=res$par[2:(length(res$par))], B=-res$value.objfn, 
+                  niter = res$iter, converged=res$convergence))
+    }else{
+      A=getA(n=n,k=q,v,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,sehat=sehat)
+      
+      res = squarem(par=pi.init,fixptfn=fixpoint_pi, objfn=penloglik_pi, 
+                    A=A,n=n,k=q,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,v=v,sehat=sehat,prior=prior,c=c.init,
+                    control=list(maxiter=maxiter,tol=tol))
+      return(list(chat = c.init, pihat=res$par, B=-res$value.objfn, 
+                  niter = res$iter, converged=res$convergence))
+    }
     
-    res = squarem(par=params.init,fixptfn=fixpoint_se, objfn=penloglik_se, 
-                  A=A,n=n,k=q,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,v=v,sehat=sehat,prior=prior,
-                  control=list(maxiter=maxiter,tol=tol))
-    return(list(chat = exp(res$par[1]), pihat=res$par[2:(length(res$par))], B=-res$value.objfn, 
-                niter = res$iter, converged=res$convergence))
   }else{
     params.init=c(log(c.init),log(alpha.vec))
     res=optim(params.init,loglike.se.ac,gr=gradloglike.se.ac,method='L-BFGS-B',
@@ -157,10 +168,29 @@ fixpoint_se = function(params,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior){
 }
 
 #' Title
+fixpoint_pi = function(pi,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior,c){  
+  mm = post_pi_vash(A,n,k,v,sehat,alpha.vec,modalpha.vec,c,pi)
+  m.rowsum = rowSums(mm)
+  classprob = mm/m.rowsum
+  newpi = colSums(classprob)+prior-1
+  newpi = ifelse(newpi<1e-5,1e-5,newpi)
+  newpi = newpi/sum(newpi);
+  return(newpi)
+}
+
+#' Title
 penloglik_se = function(params,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior){
   c=exp(params[1])
   pi=params[2:(length(params))]
-  iter=params[length(params)]
+  priordens = sum((prior-1)*log(pi))
+  mm = post_pi_vash(A,n,k,v,sehat,alpha.vec,modalpha.vec,c,pi)
+  m.rowsum = rowSums(mm)
+  loglik = sum(log(m.rowsum))
+  return(-(loglik+priordens))
+}
+
+#' Title
+penloglik_pi = function(pi,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior,c){
   priordens = sum((prior-1)*log(pi))
   mm = post_pi_vash(A,n,k,v,sehat,alpha.vec,modalpha.vec,c,pi)
   m.rowsum = rowSums(mm)
@@ -304,66 +334,9 @@ mod_t_test=function(betahat,se,pi,v){
 }
 
 
-#' 
-#' @title  Main Variance Adaptive SHrinkage function
-#'
-#' @description Takes vectors of estimates (betahat) and their standard errors (sehat), and applies
-#' shrinkage to them, using Empirical Bayes methods, to compute shrunk estimates for beta.
-#'
-#' @details See readme for more details
-#' 
-#' @param sehat, a p vector of standard errors
-#' @param df: appropriate degrees of freedom for (chi-square) distribution of sehat
-#' @param betahat: a p vector of estimates
-#' @param randomstart: bool, indicating whether to initialize EM randomly. If FALSE, then initializes to prior mean (for EM algorithm) or prior (for VBEM)
-#' @param singlecomp: bool, indicating whether to use a single inverse-gamma distribution as the prior distribution for the variances
-#' @param unimodal: unimodal constraint for the prior distribution of the variances ("variance") or the precisions ("precision")
-#' @param prior: string, or numeric vector indicating Dirichlet prior on mixture proportions (defaults to "uniform", or 1,1...,1; also can be "nullbiased" 1,1/k-1,...,1/k-1 to put more weight on first component)
-#' @param g: the prior distribution for beta (usually estimated from the data; this is used primarily in simulated data to do computations with the "true" g)
-#' @param maxiter: maximum number of iterations of the EM algorithm
-#' 
-#'
-#' @return a list with elements fitted.g is fitted mixture
-#' 
-#' @export
-#' 
-#' @examples 
-#' se = rigamma(100,1,1)
-#' sehat = se*rchisq(100,5)/5
-#' se.vash = vash(sehat,5)
-#' plot(sehat,se.vash$PosteriorMean,xlim=c(0,10),ylim=c(0,10))
-vash = function(sehat,df,
-                betahat=NULL,
-                randomstart=FALSE,   
-                singlecomp = FALSE,
-                unimodal = c("variance","precision"),
-                prior=NULL,
-                g=NULL,
-                maxiter = 5000){
-  
-  #method provides a convenient interface to set a particular combinations of parameters for prior an
-  #If method is supplied, use it to set up specific values for these parameters; provide warning if values
-  #are also specified by user
-  #If method is not supplied use the user-supplied values (or defaults if user does not specify them)
-  
-  
-  
-  if(missing(unimodal)){
-    unimodal = match.arg(unimodal) 
-  }
-  if(!is.element(unimodal,c("variance","precision"))) stop("Error: invalid type of singlecomp")  
-  
-  completeobs = (!is.na(sehat))
-  n=sum(completeobs)
-  
-  # If some standard errors are almost 0, add a small pseudocount to prevent numerical errors
-  sehat[sehat==0] = min(min(sehat[sehat>0]),1e-6)
-  
-  if(n==0){
-    stop("Error: all input values are missing")
-  }  
-  
-  if(!missing(g)){
+vash.core = function(sehat,df,betahat,randomstart,singlecomp,unimodal,
+                     prior,g,maxiter,estpriormode,priormode,completeobs){
+  if(!is.null(g)){
     maxiter = 1 # if g is specified, don't iterate the EM
     prior = rep(1,length(g$pi)) #prior is not actually used if g specified, but required to make sure EM doesn't produce warning
     l = length(g$pi)
@@ -388,11 +361,20 @@ vash = function(sehat,df,
       beta = mm$b/(mm$a+1)*(alpha+1)
     }
     
+    if(estpriormode==FALSE & !is.null(priormode)){
+      if(unimodal=='precision'){
+        beta = priormode*(alpha-1)
+      }else if(unimodal=='variance'){
+        beta = priormode*(alpha+1)
+      }
+    }else if (estpriormode==TRUE & !is.null(priormode)){
+      warning('Flag estpriormode=TRUE, vash will still estimate the prior mode instead of using the input value!')
+    }       
     l = length(alpha)
   }
   
   
-  if(missing(prior)){
+  if(is.null(prior)){
     prior = rep(1,l)
   }
   
@@ -403,7 +385,7 @@ vash = function(sehat,df,
   }
   pi.se=pi.se/sum(pi.se)
   
-  if (!missing(g)){
+  if (!is.null(g)){
     g=igmix(g$pi,g$alpha,g$beta)
   }else{
     g=igmix(pi.se,alpha,beta)
@@ -413,7 +395,96 @@ vash = function(sehat,df,
     stop("invalid prior specification")
   }
   
-  pi.fit.se = EMest_se(sehat[completeobs],g,prior,maxiter,df,unimodal, singlecomp)
+  pi.fit.se = EMest_se(sehat[completeobs],g,prior,maxiter,df,unimodal,singlecomp,estpriormode)
+  return(pi.fit.se)
+}
+
+
+
+#' 
+#' @title  Main Variance Adaptive SHrinkage function
+#'
+#' @description Takes vectors of estimates (betahat) and their standard errors (sehat), and applies
+#' shrinkage to them, using Empirical Bayes methods, to compute shrunk estimates for beta.
+#'
+#' @details See readme for more details
+#' 
+#' @param sehat, a p vector of standard errors
+#' @param df: appropriate degrees of freedom for (chi-square) distribution of sehat
+#' @param betahat: a p vector of estimates
+#' @param randomstart: bool, indicating whether to initialize EM randomly. If FALSE, then initializes to prior mean (for EM algorithm) or prior (for VBEM)
+#' @param singlecomp: bool, indicating whether to use a single inverse-gamma distribution as the prior distribution for the variances
+#' @param unimodal: unimodal constraint for the prior distribution of the variances ("variance") or the precisions ("precision")
+#' @param prior: string, or numeric vector indicating Dirichlet prior on mixture proportions (defaults to "uniform", or 1,1...,1; also can be "nullbiased" 1,1/k-1,...,1/k-1 to put more weight on first component)
+#' @param g: the prior distribution for beta (usually estimated from the data; this is used primarily in simulated data to do computations with the "true" g)
+#' @param maxiter: maximum number of iterations of the EM algorithm
+#' @param estpriormode: bool, indicating whether to estimate the mode of the unimodal prior
+#' @param priormode: specified prior mode (only works when estpriormode=FALSE).
+#'
+#' @return a list with elements fitted.g is fitted mixture
+#' 
+#' @export
+#' 
+#' @examples 
+#' se = rigamma(100,1,1)
+#' sehat = se*rchisq(100,5)/5
+#' se.vash = vash(sehat,5)
+#' plot(sehat,se.vash$PosteriorMean,xlim=c(0,10),ylim=c(0,10))
+vash = function(sehat,df,
+                betahat=NULL,
+                randomstart=FALSE,   
+                singlecomp = FALSE,
+                unimodal = c("auto","variance","precision"),
+                prior=NULL,
+                g=NULL,
+                maxiter = 5000,
+                estpriormode = TRUE,
+                priormode = NULL){
+  
+  #method provides a convenient interface to set a particular combinations of parameters for prior an
+  #If method is supplied, use it to set up specific values for these parameters; provide warning if values
+  #are also specified by user
+  #If method is not supplied use the user-supplied values (or defaults if user does not specify them)
+  
+  
+  
+  if(missing(unimodal)){
+    unimodal = match.arg(unimodal) 
+  }
+  if(!is.element(unimodal,c("auto","variance","precision"))) stop("Error: invalid type of unimodal.")  
+  
+  completeobs = (!is.na(sehat))
+  n=sum(completeobs)
+  
+  # If some standard errors are almost 0, add a small pseudocount to prevent numerical errors
+  sehat[sehat==0] = min(min(sehat[sehat>0]),1e-6)
+  
+  if(n==0){
+    stop("Error: all input values are missing.")
+  }  
+  
+  if(unimodal=='auto' & !singlecomp){
+    pifit.prec = vash.core(sehat,df,betahat,randomstart,singlecomp,unimodal='precision',
+                          prior,g,maxiter,estpriormode,priormode,completeobs)
+    pifit.var = vash.core(sehat,df,betahat,randomstart,singlecomp,unimodal='variance',
+                          prior,g,maxiter,estpriormode,priormode,completeobs)
+    if (pifit.prec$fit$loglik >= pifit.var$fit$loglik){
+      pi.fit.se = pifit.prec
+      opt.unimodal = 'precision'
+    }else{
+      pi.fit.se = pifit.var
+      opt.unimodal = 'variance'
+    }
+  }else if(unimodal=='auto' & singlecomp){
+    pi.fit.se = vash.core(sehat,df,betahat,randomstart,singlecomp,unimodal='variance',
+                          prior,g,maxiter,estpriormode,priormode,completeobs)
+    opt.unimodal = NA
+  }else{
+    pi.fit.se = vash.core(sehat,df,betahat,randomstart,singlecomp,unimodal,
+                          prior,g,maxiter,estpriormode,priormode,completeobs)
+    opt.unimodal = NA
+  }
+  
   post.se = post.igmix(pi.fit.se$g,rep(numeric(0),n),sehat[completeobs],df)
   postpi.se = t(matrix(rep(pi.fit.se$g$pi,length(sehat)),ncol=length(sehat)))
   postpi.se[completeobs,] = t(comppostprob(pi.fit.se$g,rep(numeric(0),n),sehat[completeobs],df))
@@ -429,7 +500,9 @@ vash = function(sehat,df,
   PosteriorRate.se[completeobs,] = post.se$beta
   
   #PosteriorMean.se[completeobs] = sqrt(postmean(pi.fit.se$g,rep(numeric(0),n),sehat[completeobs],df))
-  PosteriorMean.se = sqrt(apply(postpi.se*PosteriorRate.se/PosteriorShape.se,1,sum))
+  #PosteriorMean.se = sqrt(apply(postpi.se*PosteriorRate.se/PosteriorShape.se,1,sum))
+  PosteriorMean.se[completeobs] = sqrt(1/apply(postpi.se*PosteriorShape.se/PosteriorRate.se,1,sum))
+
   
   if(length(betahat)==n){
     pvalue=mod_t_test(betahat,sqrt(PosteriorRate.se/PosteriorShape.se),
@@ -452,6 +525,8 @@ vash = function(sehat,df,
                 PosteriorPi=postpi.se,
                 pvalue=pvalue,
                 qvalue=qvalue,
+                unimodal=unimodal,
+                opt.unimodal=opt.unimodal,
                 fit=pi.fit.se,call=match.call(),data=list(sehat=sehat))
   class(result)= "vash"
   return(result)
