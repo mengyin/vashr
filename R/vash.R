@@ -468,7 +468,7 @@ vash = function(sehat,df,
                           prior,g,maxiter,estpriormode,priormode,completeobs)
     pifit.var = vash.core(sehat,df,betahat,randomstart,singlecomp,unimodal='variance',
                           prior,g,maxiter,estpriormode,priormode,completeobs)
-    if (pifit.prec$fit$loglik >= pifit.var$fit$loglik){
+    if (pifit.prec$loglik >= pifit.var$loglik){
       pi.fit.se = pifit.prec
       opt.unimodal = 'precision'
     }else{
