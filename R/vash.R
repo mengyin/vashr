@@ -19,6 +19,18 @@ getA = function(n,k,v,alpha.vec,modalpha.vec,sehat){
   return(A)
 }
 
+loglike = function(sehat,df,pi,alpha,beta){
+  k = length(pi)
+  n = length(sehat)
+  
+  pimat = outer(rep(1,n),pi)*exp(df/2*log(df/2)-lgamma(df/2)
+                                 +(df/2-1)*outer(2*log(sehat),rep(1,k))
+                                 +outer(rep(1,n),alpha*log(beta)-lgamma(alpha)+lgamma(alpha+df/2))
+                                 -outer(rep(1,n),alpha+df/2)*log(outer(df/2*sehat^2,beta,FUN="+")))
+  logl = sum(log(rowSums(pimat)))
+  return(logl)
+}
+
 #estimate mixture proportions of se's prior by EM algorithm
 #prior gives the parameter of a Dirichlet prior on pi
 #(prior is used to encourage results towards smallest value of sigma when
@@ -40,23 +52,22 @@ EMest_se = function(sehat,g,prior,maxiter=5000, v,unimodal, singlecomp, estprior
   
   EMfit = IGmixEM(sehat, v, c.init, g$alpha, pi.init, prior, unimodal,singlecomp, estpriormode, tol, maxiter)
   
-  loglik = EMfit$B # actually return log lower bound not log-likelihood! 
   converged = EMfit$converged
   niter = EMfit$niter
-  loglik.final = EMfit$B[length(EMfit$B)]
   
-  g$pi=EMfit$pihat 
-  g$c=EMfit$chat 
+  g$pi = EMfit$pihat 
+  g$c = EMfit$chat 
   if(singlecomp==TRUE){
-    g$alpha=EMfit$alphahat
+    g$alpha = EMfit$alphahat
   }
   if(unimodal=='variance'){
-    g$beta=g$c*(g$alpha+1)
+    g$beta = g$c*(g$alpha+1)
   }else if(unimodal=='precision'){
-    g$beta=g$c*(g$alpha-1)
+    g$beta = g$c*(g$alpha-1)
   }
+  loglik = loglike(sehat,v,g$pi,g$alpha,g$beta)
   
-  return(list(loglik=loglik.final,converged=converged,g=g,niter=niter))
+  return(list(loglik=loglik,converged=converged,g=g,niter=niter))
 }
 
 
@@ -66,16 +77,16 @@ IGmixEM = function(sehat, v, c.init, alpha.vec, pi.init, prior, unimodal,singlec
   n = length(sehat)
   
   if(unimodal=='variance'){
-    modalpha.vec=alpha.vec+1
+    modalpha.vec = alpha.vec+1
   }else if(unimodal=='precision'){
-    modalpha.vec=alpha.vec-1
+    modalpha.vec = alpha.vec-1
   }
   
   
   if(singlecomp==FALSE){
     if(estpriormode==TRUE){
-      params.init=c(log(c.init),pi.init)
-      A=getA(n=n,k=q,v,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,sehat=sehat)
+      params.init = c(log(c.init),pi.init)
+      A = getA(n=n,k=q,v,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,sehat=sehat)
       
       res = squarem(par=params.init,fixptfn=fixpoint_se, objfn=penloglik_se, 
                     A=A,n=n,k=q,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,v=v,sehat=sehat,prior=prior,
@@ -83,23 +94,23 @@ IGmixEM = function(sehat, v, c.init, alpha.vec, pi.init, prior, unimodal,singlec
       return(list(chat = exp(res$par[1]), pihat=res$par[2:(length(res$par))], B=-res$value.objfn, 
                   niter = res$iter, converged=res$convergence))
     }else{
-      A=getA(n=n,k=q,v,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,sehat=sehat)
+      A = getA(n=n,k=q,v,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,sehat=sehat)
       
       res = squarem(par=pi.init,fixptfn=fixpoint_pi, objfn=penloglik_pi, 
                     A=A,n=n,k=q,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,v=v,sehat=sehat,prior=prior,c=c.init,
                     control=list(maxiter=maxiter,tol=tol))
-      return(list(chat = c.init, pihat=res$par, B=-res$value.objfn, 
-                  niter = res$iter, converged=res$convergence))
+      return(list(chat=c.init, pihat=res$par, B=-res$value.objfn, 
+                  niter=res$iter, converged=res$convergence))
     }
     
   }else{
-    params.init=c(log(c.init),log(alpha.vec))
-    res=optim(params.init,loglike.se.ac,gr=gradloglike.se.ac,method='L-BFGS-B',
+    params.init = c(log(c.init),log(alpha.vec))
+    res = optim(params.init,loglike.se.ac,gr=gradloglike.se.ac,method='L-BFGS-B',
               lower=c(NA,0), upper=c(NA,log(100)),
               n=n,k=1,v=v,sehat=sehat,pi=pi,unimodal=unimodal,
               control=list(maxit=maxiter,pgtol=tol))
-    return(list(chat = exp(res$par[1]), pihat=1, B=-res$value, 
-                niter = res$counts[1], converged=res$convergence,
+    return(list(chat=exp(res$par[1]), pihat=1, B=-res$value, 
+                niter=res$counts[1], converged=res$convergence,
                 alphahat=exp(res$par[2])))
   }
   
@@ -145,14 +156,14 @@ solve_trigamma = function(x){
 # Posterior weight of P(se|sehat) (IG mixture distn)
 #' Title 
 post_pi_vash = function(A,n,k,v,sehat,alpha.vec,modalpha.vec,c,pi){
-  post.pi.mat=t(pi*exp(A+alpha.vec*log(c)-(alpha.vec+v/2)*log(outer(c*modalpha.vec,v/2*sehat^2,FUN="+"))))
+  post.pi.mat = t(pi*exp(A+alpha.vec*log(c)-(alpha.vec+v/2)*log(outer(c*modalpha.vec,v/2*sehat^2,FUN="+"))))
   return(pimat=post.pi.mat)
 }
 
 #' Title
 fixpoint_se = function(params,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior){
-  logc=params[1]
-  pi=params[2:(length(params))]
+  logc = params[1]
+  pi = params[2:(length(params))]
 
   mm = post_pi_vash(A,n,k,v,sehat,alpha.vec,modalpha.vec,exp(logc),pi)
   m.rowsum = rowSums(mm)
@@ -160,9 +171,9 @@ fixpoint_se = function(params,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior){
   newpi = colSums(classprob)+prior-1
   newpi = ifelse(newpi<1e-5,1e-5,newpi)
   newpi = newpi/sum(newpi);
-  est=optim(logc,loglike.se,gr=gradloglike.se,method='BFGS',n=n,k=k,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,v=v,sehat=sehat,pi=newpi)
-  newc=exp(est$par[1])
-  newlogc=est$par[1]
+  est = optim(logc,loglike.se,gr=gradloglike.se,method='BFGS',n=n,k=k,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,v=v,sehat=sehat,pi=newpi)
+  newc = exp(est$par[1])
+  newlogc = est$par[1]
   params = c(newlogc,newpi)
   return(params)
 }
@@ -180,8 +191,8 @@ fixpoint_pi = function(pi,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior,c){
 
 #' Title
 penloglik_se = function(params,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior){
-  c=exp(params[1])
-  pi=params[2:(length(params))]
+  c = exp(params[1])
+  pi = params[2:(length(params))]
   priordens = sum((prior-1)*log(pi))
   mm = post_pi_vash(A,n,k,v,sehat,alpha.vec,modalpha.vec,c,pi)
   m.rowsum = rowSums(mm)
@@ -201,7 +212,7 @@ penloglik_pi = function(pi,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior,c){
 # Log-likelihood: L(sehat^2|c,pi,alpha.vec)
 #' Title 
 loglike.se = function(logc,n,k,alpha.vec,modalpha.vec,v,sehat,pi){  
-  c=exp(logc)
+  c = exp(logc)
   pimat = outer(rep(1,n),pi)*exp(v/2*log(v/2)-lgamma(v/2)
                                  +(v/2-1)*outer(2*log(sehat),rep(1,k))
                                  +outer(rep(1,n),alpha.vec*log(c*modalpha.vec)-lgamma(alpha.vec)+lgamma(alpha.vec+v/2))
@@ -213,7 +224,7 @@ loglike.se = function(logc,n,k,alpha.vec,modalpha.vec,v,sehat,pi){
 # Gradient of funtion loglike.se (w.r.t logc)
 #' Title
 gradloglike.se = function(logc,n,k,alpha.vec,modalpha.vec,v,sehat,pi){
-  c=exp(logc)
+  c = exp(logc)
   
   pimat = outer(rep(1,n),pi)*exp(v/2*log(v/2)-lgamma(v/2)
                                  +(v/2-1)*outer(2*log(sehat),rep(1,k))
@@ -230,11 +241,11 @@ gradloglike.se = function(logc,n,k,alpha.vec,modalpha.vec,v,sehat,pi){
 # Log-likelihood: L(sehat|c,pi,alpha.vec)
 #' Title
 loglike.se.a = function(logalpha.vec,c,n,k,v,sehat,pi,unimodal){  
-  alpha.vec=exp(logalpha.vec)
+  alpha.vec = exp(logalpha.vec)
   if(unimodal=='variance'){
-    modalpha.vec=alpha.vec+1
+    modalpha.vec = alpha.vec+1
   }else if(unimodal=='precision'){
-    modalpha.vec=alpha.vec-1
+    modalpha.vec = alpha.vec-1
   }
   pimat = outer(rep(1,n),pi)*exp(v/2*log(v/2)-lgamma(v/2)
                                  +(v/2-1)*outer(2*log(sehat),rep(1,k))
@@ -247,13 +258,13 @@ loglike.se.a = function(logalpha.vec,c,n,k,v,sehat,pi,unimodal){
 # Gradient of funtion loglike.se for single component prior (w.r.t logalpha)
 #' Title
 gradloglike.se.a = function(logalpha.vec,c,n,k,v,sehat,pi,unimodal){
-  alpha.vec=exp(logalpha.vec)
+  alpha.vec = exp(logalpha.vec)
   if(unimodal=='variance'){
-    modalpha.vec=alpha.vec+1
+    modalpha.vec = alpha.vec+1
   }else if(unimodal=='precision'){
-    modalpha.vec=alpha.vec-1
+    modalpha.vec = alpha.vec-1
   }
-  grad=-alpha.vec*sum(log(c)+log(modalpha.vec)+alpha.vec/modalpha.vec-digamma(alpha.vec)+digamma(alpha.vec+v/2)
+  grad = -alpha.vec*sum(log(c)+log(modalpha.vec)+alpha.vec/modalpha.vec-digamma(alpha.vec)+digamma(alpha.vec+v/2)
                       -c*(alpha.vec+v/2)/(c*modalpha.vec+v/2*sehat^2)-log(c*modalpha.vec+v/2*sehat^2))
   return(grad)
 }
@@ -261,12 +272,12 @@ gradloglike.se.a = function(logalpha.vec,c,n,k,v,sehat,pi,unimodal){
 # Log-likelihood: L(sehat|c,pi,alpha.vec)
 #' Title 
 loglike.se.ac = function(params,n,k,v,sehat,pi,unimodal){
-  c=exp(params[1])
-  alpha.vec=exp(params[2:length(params)])
+  c = exp(params[1])
+  alpha.vec = exp(params[2:length(params)])
   if(unimodal=='variance'){
-    modalpha.vec=alpha.vec+1
+    modalpha.vec = alpha.vec+1
   }else if(unimodal=='precision'){
-    modalpha.vec=alpha.vec-1
+    modalpha.vec = alpha.vec-1
   }
   pimat = outer(rep(1,n),pi)*exp(v/2*log(v/2)-lgamma(v/2)
                                  +(v/2-1)*outer(2*log(sehat),rep(1,k))
@@ -283,12 +294,12 @@ loglike.se.ac = function(params,n,k,v,sehat,pi,unimodal){
 # Gradient of funtion loglike.se for single component prior (w.r.t logc and logalpha)
 #' Title
 gradloglike.se.ac=function(params,n,k,v,sehat,pi,unimodal){
-  c=exp(params[1])
-  alpha.vec=exp(params[2:(length(params))])
+  c = exp(params[1])
+  alpha.vec = exp(params[2:(length(params))])
   if(unimodal=='variance'){
-    modalpha.vec=alpha.vec+1
+    modalpha.vec = alpha.vec+1
   }else if(unimodal=='precision'){
-    modalpha.vec=alpha.vec-1
+    modalpha.vec = alpha.vec-1
   }
   pimat = outer(rep(1,n),pi)*exp(v/2*log(v/2)-lgamma(v/2)
                                  +(v/2-1)*outer(2*log(sehat),rep(1,k))
@@ -301,7 +312,7 @@ gradloglike.se.ac=function(params,n,k,v,sehat,pi,unimodal){
                              (outer(v/2*sehat^2,c*modalpha.vec,FUN='+')))
   grad.c = sum(-gradmat.c)
   
-  grad.a=-alpha.vec*sum(log(c)+log(modalpha.vec)+alpha.vec/modalpha.vec-digamma(alpha.vec)+digamma(alpha.vec+v/2)
+  grad.a = -alpha.vec*sum(log(c)+log(modalpha.vec)+alpha.vec/modalpha.vec-digamma(alpha.vec)+digamma(alpha.vec+v/2)
                         -c*(alpha.vec+v/2)/(c*modalpha.vec+v/2*sehat^2)-log(c*modalpha.vec+v/2*sehat^2))
   res = c(grad.c,grad.a)
   res = pmin(res,1e200)
@@ -316,20 +327,20 @@ post.igmix = function(m,betahat,sebetahat,v){
   alpha1 = outer(rep(1,n),m$alpha+v/2)
   beta1 = outer(m$beta,v/2*sebetahat^2,FUN="+")
   ismissing = is.na(sebetahat)
-  beta1[,ismissing]=m$beta
+  beta1[,ismissing] = m$beta
   return(list(alpha=alpha1,beta=t(beta1)))
 }
 
 # Moderated t test
 #' Title
 mod_t_test=function(betahat,se,pi,v){
-  n=length(betahat)
-  k=length(pi)/n
-  pvalue=rep(NA,n)
-  completeobs=(!is.na(betahat) & !is.na(apply(se,1,sum)))
-  temppvalue=pt(outer(betahat[completeobs],rep(1,k))/se[completeobs,],df=v,lower.tail=TRUE)
-  temppvalue=pmin(temppvalue,1-temppvalue)*2
-  pvalue[completeobs]=apply(pi[completeobs,]*temppvalue,1,sum)
+  n = length(betahat)
+  k = length(pi)/n
+  pvalue = rep(NA,n)
+  completeobs = (!is.na(betahat) & !is.na(apply(se,1,sum)))
+  temppvalue = pt(outer(betahat[completeobs],rep(1,k))/se[completeobs,],df=v,lower.tail=TRUE)
+  temppvalue = pmin(temppvalue,1-temppvalue)*2
+  pvalue[completeobs] = apply(pi[completeobs,]*temppvalue,1,sum)
   return(pvalue)
 }
 
@@ -381,14 +392,14 @@ vash.core = function(sehat,df,betahat,randomstart,singlecomp,unimodal,
   if(randomstart){
     pi.se = rgamma(l,1,1)
   } else {   
-    pi.se=rep(1,l)/l
+    pi.se = rep(1,l)/l
   }
-  pi.se=pi.se/sum(pi.se)
+  pi.se = pi.se/sum(pi.se)
   
   if (!is.null(g)){
-    g=igmix(g$pi,g$alpha,g$beta)
+    g = igmix(g$pi,g$alpha,g$beta)
   }else{
-    g=igmix(pi.se,alpha,beta)
+    g = igmix(pi.se,alpha,beta)
   }
   
   if(length(prior)!=l){
@@ -454,7 +465,7 @@ vash = function(sehat,df,
   if(!is.element(unimodal,c("auto","variance","precision"))) stop("Error: invalid type of unimodal.")  
   
   completeobs = (!is.na(sehat))
-  n=sum(completeobs)
+  n = sum(completeobs)
   
   # If some standard errors are almost 0, add a small pseudocount to prevent numerical errors
   sehat[sehat==0] = min(min(sehat[sehat>0]),1e-6)
@@ -505,16 +516,16 @@ vash = function(sehat,df,
 
   
   if(length(betahat)==n){
-    pvalue=mod_t_test(betahat,sqrt(PosteriorRate.se/PosteriorShape.se),
+    pvalue = mod_t_test(betahat,sqrt(PosteriorRate.se/PosteriorShape.se),
                       postpi.se,PosteriorShape.se*2)
-    qvalue=qvalue(pvalue)$qval
+    qvalue = qvalue(pvalue)$qval
   }else if(length(betahat)==0){
-    pvalue=NULL
-    qvalue=NULL
+    pvalue = NULL
+    qvalue = NULL
   }else{
     warning("betahat has different length as sehat, cannot compute moderated t-tests")
-    pvalue=NULL
-    qvalue=NULL
+    pvalue = NULL
+    qvalue = NULL
   }
   
   result = list(fitted.g=pi.fit.se$g,
@@ -528,6 +539,6 @@ vash = function(sehat,df,
                 unimodal=unimodal,
                 opt.unimodal=opt.unimodal,
                 fit=pi.fit.se,call=match.call(),data=list(sehat=sehat))
-  class(result)= "vash"
+  class(result) = "vash"
   return(result)
 }
