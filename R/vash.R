@@ -106,7 +106,7 @@ IGmixEM = function(sehat, v, c.init, alpha.vec, pi.init, prior, unimodal,singlec
   }else{
     params.init = c(log(c.init),log(alpha.vec))
     res = optim(params.init,loglike.se.ac,gr=gradloglike.se.ac,method='L-BFGS-B',
-              lower=c(NA,0), upper=c(NA,log(100)),
+              lower=c(NA,-3), upper=c(NA,log(100)),
               n=n,k=1,v=v,sehat=sehat,pi=pi,unimodal=unimodal,
               control=list(maxit=maxiter,pgtol=tol))
     return(list(chat=exp(res$par[1]), pihat=1, B=-res$value, 
