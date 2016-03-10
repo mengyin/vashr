@@ -1,10 +1,155 @@
-#library(SQUAREM)
-#library(gaussquad)
+#' @title  Main Variance Adaptive SHrinkage function
+#'
+#' @description Takes vectors of standard errors (sehat), and applies shrinkage to them, 
+#' using Empirical Bayes methods, to compute shrunk estimates for variances.
+#'
+#' @details See readme for more details
+#' 
+#' @param sehat a p vector of observed standard errors
+#' @param df appropriate degrees of freedom for (chi-square) distribution of sehat
+#' @param betahat a p vector of estimates (optional)
+#' @param randomstart logical, indicating whether to initialize EM randomly. If FALSE, then initializes to prior mean (for EM algorithm) or prior (for VBEM)
+#' @param singlecomp logical, indicating whether to use a single inverse-gamma distribution as the prior distribution for the variances
+#' @param unimodal put unimodal constraint on the prior distribution of variances ("variance") or precisions ("precision")
+#' @param prior string, or numeric vector indicating Dirichlet prior on mixture proportions (defaults to "uniform", or 1,1...,1; also can be "nullbiased" 1,1/k-1,...,1/k-1 to put more weight on first component)
+#' @param g the prior distribution for variances (usually estimated from the data; this is used primarily in simulated data to do computations with the "true" g)
+#' @param maxiter maximum number of iterations of the EM algorithm
+#' @param estpriormode logical, indicating whether to estimate the mode of the unimodal prior
+#' @param priormode specified prior mode (only works when estpriormode=FALSE).
+#'
+#' @return vash returns an object of \code{\link[base]{class}} "vash", a list with the following elements
+#' \item{fitted.g}{fitted mixture prior}
+#' \item{sd.post}{A vector consisting the posterior estimate of standard deviations (square root of variances) from the mixture}
+#' \item{PosteriorPi}{A p*k matrix consisting the mixture proportions of the posterior distribution of variance (k is number of mixture components)}
+#' \item{PosteriorShape}{A p*k matrix consisting the shape parameters of the inverse-gamma posterior distribution of variance (k is number of mixture components)}
+#' \item{PosteriorRate}{A p*k matrix consisting the rate parameters of the inverse-gamma posterior distribution of variance (k is number of mixture components)}
+#' \item{pvalue}{A vector p-values}
+#' \item{qvalue}{A vector of q-values}
+#' \item{fit}{The fitted mixture object}
+#' \item{unimodal}{denoting whether unimodal variance prior or unimodal precision prior has been used}
+#' \item{opt.unimodal}{denoting whether unimodal variance prior or unimodal precision prior model gets higher likelihood}
+#' \item{call}{a call in which all of the specified arguments are specified by their full names}
+#' \item{data}{a list consisting the input sehat}
+#' 
+#' @export
+#' 
+#' @examples 
+#' var = 1/rgamma(100,5,5)
+#' sehat = sqrt(var*rchisq(100,7)/7)
+#' se.vash = vash(sehat,df=7)
+#' plot(sehat, se.vash$sd.post, xlim=c(0,10), ylim=c(0,10))
+#' 
+#' #Running vash with a pre-specified g, rather than estimating it
+#' var = c(rigamma(100,5,4),rigmma(100,10,9))
+#' sehat = sqrt(var*rchisq(100,7)/7)
+#' true_g = igmix(c(0.5,0.5),c(5,10),c(4,9)) # define true g 
+#' #Passing this g into vash causes it to i) take the shape and the rate for each component from this g, and ii) initialize pi to the value from this g.
+#' se.vash = vash(sehat, df=7, g=true_g)
+vash = function(sehat, df,
+                betahat = NULL,
+                randomstart = FALSE,   
+                singlecomp = FALSE,
+                unimodal = c("auto","variance","precision"),
+                prior = NULL,
+                g = NULL,
+                maxiter = 5000,
+                estpriormode = TRUE,
+                priormode = NULL){
+  
+  ## 1.Handling Input Parameters
+  
+  # Set unimodal constraint on variance or precision prior
+  # if no unimodal mode specified, select a default "auto" mode,
+  # which chooses the model with higher likelihood
+  if(missing(unimodal)){
+    unimodal = match.arg(unimodal) 
+  }
+  if(!is.element(unimodal,c("auto","variance","precision"))) stop("Error: invalid type of unimodal.")  
+  
+  # Set observations with infinite standard errors to missing
+  # later these missing observations will be ignored in EM, and posterior will be same as prior.
+  sehat[sehat==Inf] = NA
+  completeobs = (!is.na(sehat))
+  n = sum(completeobs)
+  
+  # If some standard errors are almost 0, add a small pseudocount to prevent numerical errors
+  sehat[sehat==0] = min(min(sehat[sehat>0]),1e-6)
+  
+  if(n==0){
+    stop("Error: all input values are missing.")
+  }  
+  
+  ## 2. Fitting the mixture prior
+  
+  # If singlecomp==TRUE, then both variance and precision priors are unimodal
+  # otherwise need decide whether using unimodal variance prior model or 
+  # unimodal precision prior model by likelihood
+  if(unimodal=='auto' & !singlecomp){
+    pifit.prec = est_prior(sehat,df,betahat,randomstart,singlecomp,unimodal='precision',
+                           prior,g,maxiter,estpriormode,priormode,completeobs)
+    pifit.var = est_prior(sehat,df,betahat,randomstart,singlecomp,unimodal='variance',
+                          prior,g,maxiter,estpriormode,priormode,completeobs)
+    if (pifit.prec$loglik >= pifit.var$loglik){
+      mix.fit = pifit.prec
+      opt.unimodal = 'precision'
+    }else{
+      mix.fit = pifit.var
+      opt.unimodal = 'variance'
+    }
+  }else if(unimodal=='auto' & singlecomp){
+    mix.fit = est_prior(sehat,df,betahat,randomstart,singlecomp,unimodal='variance',
+                        prior,g,maxiter,estpriormode,priormode,completeobs)
+    opt.unimodal = NA
+  }else{
+    mix.fit = est_prior(sehat,df,betahat,randomstart,singlecomp,unimodal,
+                        prior,g,maxiter,estpriormode,priormode,completeobs)
+    opt.unimodal = NA
+  }
+  
+  post.se = post.igmix(mix.fit$g,rep(numeric(0),n),sehat[completeobs],df)
+  postpi.se = t(matrix(rep(mix.fit$g$pi,length(sehat)),ncol=length(sehat)))
+  postpi.se[completeobs,] = t(comppostprob(mix.fit$g,rep(numeric(0),n),sehat[completeobs],df))
+  
+  PosteriorMean.se = rep(mix.fit$g$c,length=length(sehat))
+  
+  PosteriorShape.se = t(matrix(rep(mix.fit$g$alpha,length(sehat)),ncol=length(sehat)))
+  PosteriorShape.se[completeobs,] = post.se$alpha
+  PosteriorRate.se = t(matrix(rep(mix.fit$g$beta,length(sehat)),ncol=length(sehat)))
+  PosteriorRate.se[completeobs,] = post.se$beta
+  
+  PosteriorMean.se[completeobs] = sqrt(1/apply(postpi.se*PosteriorShape.se/PosteriorRate.se,1,sum))
+  
+  
+  if(length(betahat)==n){
+    pvalue = mod_t_test(betahat,sqrt(PosteriorRate.se/PosteriorShape.se),
+                        postpi.se,PosteriorShape.se*2)
+    qvalue = qvalue(pvalue)$qval
+  }else if(length(betahat)==0){
+    pvalue = NULL
+    qvalue = NULL
+  }else{
+    warning("betahat has different length as sehat, cannot compute moderated t-tests")
+    pvalue = NULL
+    qvalue = NULL
+  }
+  
+  result = list(fitted.g=mix.fit$g,
+                sd.post=PosteriorMean.se,
+                PosteriorPi=postpi.se,
+                PosteriorShape=PosteriorShape.se,
+                PosteriorRate=PosteriorRate.se,
+                pvalue=pvalue,
+                qvalue=qvalue,
+                unimodal=unimodal,
+                opt.unimodal=opt.unimodal,
+                fit=mix.fit,call=match.call(),data=list(sehat=sehat))
+  class(result) = "vash"
+  return(result)
+}
 
 
 # If x is a n-column vector, turn it into n by 1 matrix
 # If x is a matrix, keep it
-#' Title
 tomatrix = function(x){
   if(is.vector(x)){
     x = as.matrix(x)
@@ -13,12 +158,26 @@ tomatrix = function(x){
 }
 
 # To simplify computation, compute a part of post_pi_vash in advance
-#' Title
 getA = function(n,k,v,alpha.vec,modalpha.vec,sehat){
   A = v/2*log(v/2)-lgamma(v/2)+(v/2-1)*outer(rep(1,k),2*log(sehat))+outer(alpha.vec*log(modalpha.vec)-lgamma(alpha.vec)+lgamma(alpha.vec+v/2),rep(1,n))
   return(A)
 }
 
+#' 
+#' @title Compute log-likelihood of the variance model with mixture inverse-gamma prior
+#' 
+#' @description Suppose we observe standard errors sehat, where \eqn{sehat^2~s^2 \times \chi^2_{df}/df}, and $s^2$ comes from an inverse-gamma mixture prior. This function computes the log-likelihood of the model.
+#' 
+#' @param sehat a p vector of observed standard errors
+#' @param df the degree of freedom
+#' @param pi a k vector, the mixture proportions of the k component inverse-gamma mixture prior
+#' @param alpha a k vector, the shape parameters of the k component inverse-gamma mixture prior
+#' @param beta a k vector, the rate parameters of the k component inverse-gamma mixture prior
+#'
+#' @return log-likehihood
+#' 
+#' @export
+#' 
 loglike = function(sehat,df,pi,alpha,beta){
   k = length(pi)
   n = length(sehat)
@@ -31,13 +190,22 @@ loglike = function(sehat,df,pi,alpha,beta){
   return(logl)
 }
 
-#estimate mixture proportions of se's prior by EM algorithm
-#prior gives the parameter of a Dirichlet prior on pi
-#(prior is used to encourage results towards smallest value of sigma when
-#likelihood is flat)
-#' Title 
-EMest_se = function(sehat,g,prior,maxiter=5000, v,unimodal, singlecomp, estpriormode){ 
-  
+#' @title Estimate mixture proportions and mode of the unimodal mixture prior
+#'
+#' @param sehat n vector of standard errors of observations
+#' @param g the prior distribution for variances (usually estimated from the data)
+#' @param prior string, or numeric vector indicating Dirichlet prior on mixture proportions (defaults to "uniform", or (1,1...,1))
+#' @param df appropriate degrees of freedom for chi-square distribution of sehat^2
+#' @param unimodal put unimodal constraint on the prior distribution of variances ("variance") or precisions ("precision")
+#' @param singlecomp logical, indicating whether to use a single inverse-gamma distribution as the prior distribution for the variances
+#' @param estpriormode logical, indicating whether to estimate the mode of the unimodal prior
+#' @param maxiter maximum number of iterations of the EM algorithm
+#' 
+#' @return A list, including the final loglikelihood, the fitted prior g, number of iterations and a flag to indicate convergence.
+#' 
+#' @export
+#' 
+est_mixprop_mode = function(sehat, g, prior, df, unimodal, singlecomp, estpriormode, maxiter=5000){ 
   pi.init = g$pi
   k = ncomp(g)
   n = length(sehat)
@@ -50,7 +218,7 @@ EMest_se = function(sehat,g,prior,maxiter=5000, v,unimodal, singlecomp, estprior
   }
   c.init = max(c.init,1e-5)
   
-  EMfit = IGmixEM(sehat, v, c.init, g$alpha, pi.init, prior, unimodal,singlecomp, estpriormode, tol, maxiter)
+  EMfit = IGmixEM(sehat, df, c.init, g$alpha, pi.init, prior, unimodal,singlecomp, estpriormode, tol, maxiter)
   
   converged = EMfit$converged
   niter = EMfit$niter
@@ -65,13 +233,12 @@ EMest_se = function(sehat,g,prior,maxiter=5000, v,unimodal, singlecomp, estprior
   }else if(unimodal=='precision'){
     g$beta = g$c*(g$alpha-1)
   }
-  loglik = loglike(sehat,v,g$pi,g$alpha,g$beta)
+  loglik = loglike(sehat,df,g$pi,g$alpha,g$beta)
   
-  return(list(loglik=loglik,converged=converged,g=g,niter=niter))
+  return(list(loglik=loglik, converged=converged, g=g, niter=niter))
 }
 
-
-#' Title
+# Estimate the mixture inverse-gamma prior by EM algorithm
 IGmixEM = function(sehat, v, c.init, alpha.vec, pi.init, prior, unimodal,singlecomp, estpriormode, tol, maxiter){
   q = length(pi.init)
   n = length(sehat)
@@ -81,7 +248,6 @@ IGmixEM = function(sehat, v, c.init, alpha.vec, pi.init, prior, unimodal,singlec
   }else if(unimodal=='precision'){
     modalpha.vec = alpha.vec-1
   }
-  
   
   if(singlecomp==FALSE){
     if(estpriormode==TRUE){
@@ -96,7 +262,7 @@ IGmixEM = function(sehat, v, c.init, alpha.vec, pi.init, prior, unimodal,singlec
     }else{
       A = getA(n=n,k=q,v,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,sehat=sehat)
       
-      res = squarem(par=pi.init,fixptfn=fixpoint_pi, objfn=penloglik_pi, 
+      res = squarem(par=pi.init, fixptfn=fixpoint_pi, objfn=penloglik_pi, 
                     A=A,n=n,k=q,alpha.vec=alpha.vec,modalpha.vec=modalpha.vec,v=v,sehat=sehat,prior=prior,c=c.init,
                     control=list(maxiter=maxiter,tol=tol))
       return(list(chat=c.init, pihat=res$par, B=-res$value.objfn, 
@@ -117,11 +283,16 @@ IGmixEM = function(sehat, v, c.init, alpha.vec, pi.init, prior, unimodal,singlec
 }
 
 
-# Estimate the single inv-gamma prior distn params (moments matching)
-# Prior: s^2~IG(a,b)
-# sehat^2~s^2*Gamma(df/2,df/2)
-#' Title
-momentm = function(sehat,df){
+#' @title Estimate the single component inverse-gamma prior by matching the moments
+#'
+#' @param sehat n vector of standard errors of observations
+#' @param df degrees of freedom for chi-square distribution of sehat^2
+#' 
+#' @return The shape and rate of the inverse-gamma prior 
+#' 
+#' @export
+#' 
+est_singlecomp_mm = function(sehat,df){
   n = length(sehat)
   e = 2*log(sehat)-digamma(df/2)+log(df/2)
   ehat = mean(e)
@@ -131,7 +302,6 @@ momentm = function(sehat,df){
 }
 
 # Solve trigamma(y)=x
-#' Title
 solve_trigamma = function(x){
   if(x > 1e7){
     y.new = 1/sqrt(x)
@@ -154,13 +324,12 @@ solve_trigamma = function(x){
 # Likelihood: sehat^2|se^2 ~ sj*Gamma(v/2,v/2)
 # pi, alpha.vec, c: known
 # Posterior weight of P(se|sehat) (IG mixture distn)
-#' Title 
 post_pi_vash = function(A,n,k,v,sehat,alpha.vec,modalpha.vec,c,pi){
   post.pi.mat = t(pi*exp(A+alpha.vec*log(c)-(alpha.vec+v/2)*log(outer(c*modalpha.vec,v/2*sehat^2,FUN="+"))))
   return(pimat=post.pi.mat)
 }
 
-#' Title
+# fix point function of updating both pi and c
 fixpoint_se = function(params,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior){
   logc = params[1]
   pi = params[2:(length(params))]
@@ -178,7 +347,7 @@ fixpoint_se = function(params,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior){
   return(params)
 }
 
-#' Title
+# fix point function of updating pi (c known)
 fixpoint_pi = function(pi,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior,c){  
   mm = post_pi_vash(A,n,k,v,sehat,alpha.vec,modalpha.vec,c,pi)
   m.rowsum = rowSums(mm)
@@ -189,7 +358,7 @@ fixpoint_pi = function(pi,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior,c){
   return(newpi)
 }
 
-#' Title
+# penalized log-likelihood (c unknown)
 penloglik_se = function(params,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior){
   c = exp(params[1])
   pi = params[2:(length(params))]
@@ -200,7 +369,7 @@ penloglik_se = function(params,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior){
   return(-(loglik+priordens))
 }
 
-#' Title
+# penalized log-likelihood (c known)
 penloglik_pi = function(pi,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior,c){
   priordens = sum((prior-1)*log(pi))
   mm = post_pi_vash(A,n,k,v,sehat,alpha.vec,modalpha.vec,c,pi)
@@ -210,7 +379,6 @@ penloglik_pi = function(pi,A,n,k,alpha.vec,modalpha.vec,v,sehat,prior,c){
 }
 
 # Log-likelihood: L(sehat^2|c,pi,alpha.vec)
-#' Title 
 loglike.se = function(logc,n,k,alpha.vec,modalpha.vec,v,sehat,pi){  
   c = exp(logc)
   pimat = outer(rep(1,n),pi)*exp(v/2*log(v/2)-lgamma(v/2)
@@ -222,7 +390,6 @@ loglike.se = function(logc,n,k,alpha.vec,modalpha.vec,v,sehat,pi){
 }
 
 # Gradient of funtion loglike.se (w.r.t logc)
-#' Title
 gradloglike.se = function(logc,n,k,alpha.vec,modalpha.vec,v,sehat,pi){
   c = exp(logc)
   
@@ -239,7 +406,6 @@ gradloglike.se = function(logc,n,k,alpha.vec,modalpha.vec,v,sehat,pi){
 }
 
 # Log-likelihood: L(sehat|c,pi,alpha.vec)
-#' Title
 loglike.se.a = function(logalpha.vec,c,n,k,v,sehat,pi,unimodal){  
   alpha.vec = exp(logalpha.vec)
   if(unimodal=='variance'){
@@ -256,7 +422,6 @@ loglike.se.a = function(logalpha.vec,c,n,k,v,sehat,pi,unimodal){
 }
 
 # Gradient of funtion loglike.se for single component prior (w.r.t logalpha)
-#' Title
 gradloglike.se.a = function(logalpha.vec,c,n,k,v,sehat,pi,unimodal){
   alpha.vec = exp(logalpha.vec)
   if(unimodal=='variance'){
@@ -270,7 +435,6 @@ gradloglike.se.a = function(logalpha.vec,c,n,k,v,sehat,pi,unimodal){
 }
 
 # Log-likelihood: L(sehat|c,pi,alpha.vec)
-#' Title 
 loglike.se.ac = function(params,n,k,v,sehat,pi,unimodal){
   c = exp(params[1])
   alpha.vec = exp(params[2:length(params)])
@@ -284,15 +448,14 @@ loglike.se.ac = function(params,n,k,v,sehat,pi,unimodal){
                                  +outer(rep(1,n),-lgamma(alpha.vec)+lgamma(alpha.vec+v/2))
                                  +outer(rep(1,n),alpha.vec)*(log(outer(rep(1,n),c*modalpha.vec))-log(outer(v/2*sehat^2,c*modalpha.vec,FUN="+")))
                                  -(v/2)*log(outer(v/2*sehat^2,c*modalpha.vec,FUN="+")))
-  #classprob=pimat/rowSums(pimat)
+
   logl = sum(log(rowSums(pimat)))
-  logl = min(logl,1e200)
+  logl = min(logl,1e200) # avoid numerical overflow
   logl = max(logl,-1e200)
   return(-logl)
 }
 
 # Gradient of funtion loglike.se for single component prior (w.r.t logc and logalpha)
-#' Title
 gradloglike.se.ac=function(params,n,k,v,sehat,pi,unimodal){
   c = exp(params[1])
   alpha.vec = exp(params[2:(length(params))])
@@ -320,8 +483,7 @@ gradloglike.se.ac=function(params,n,k,v,sehat,pi,unimodal){
   return(res)
 }
 
-#compute posterior shape (alpha1) and rate (beta1)
-#' Title
+# compute posterior shape (alpha1) and rate (beta1)
 post.igmix = function(m,betahat,sebetahat,v){
   n = length(sebetahat)
   alpha1 = outer(rep(1,n),m$alpha+v/2)
@@ -331,40 +493,72 @@ post.igmix = function(m,betahat,sebetahat,v){
   return(list(alpha=alpha1,beta=t(beta1)))
 }
 
-# Moderated t test
-#' Title
-mod_t_test=function(betahat,se,pi,v){
+#' 
+#' @title Moderated t-test with standard errors moderated by mixture prior
+#' 
+#' @param betahat a p vector of observed effect sizes
+#' @param se a p*k matrix of moderated standard errors
+#' @param pi a p*k matrix of mixture proportions
+#' @param df a p*k matrix of degrees of freedom
+#'
+#' @return A p vector of p-values
+#' 
+#' @export
+#' 
+mod_t_test=function(betahat,se,pi,df){
   n = length(betahat)
   k = length(pi)/n
   pvalue = rep(NA,n)
   completeobs = (!is.na(betahat) & !is.na(apply(se,1,sum)))
-  temppvalue = pt(outer(betahat[completeobs],rep(1,k))/se[completeobs,],df=v,lower.tail=TRUE)
+  temppvalue = pt(outer(betahat[completeobs],rep(1,k))/se[completeobs,],df=df,lower.tail=TRUE)
   temppvalue = pmin(temppvalue,1-temppvalue)*2
   pvalue[completeobs] = apply(pi[completeobs,]*temppvalue,1,sum)
   return(pvalue)
 }
 
-
-vash.core = function(sehat,df,betahat,randomstart,singlecomp,unimodal,
+#' 
+#' @title Fit the mixture inverse-gamma prior of variance
+#' 
+#' @param sehat a p vector of observed standard errors
+#' @param df appropriate degrees of freedom for (chi-square) distribution of sehat
+#' @param betahat a p vector of estimates (optional)
+#' @param randomstart logical, indicating whether to initialize EM randomly. If FALSE, then initializes to prior mean (for EM algorithm) or prior (for VBEM)
+#' @param singlecomp logical, indicating whether to use a single inverse-gamma distribution as the prior distribution for the variances
+#' @param unimodal put unimodal constraint on the prior distribution of variances ("variance") or precisions ("precision")
+#' @param prior string, or numeric vector indicating Dirichlet prior on mixture proportions (defaults to "uniform", or 1,1...,1; also can be "nullbiased" 1,1/k-1,...,1/k-1 to put more weight on first component)
+#' @param g the prior distribution for variances (usually estimated from the data; this is used primarily in simulated data to do computations with the "true" g)
+#' @param maxiter maximum number of iterations of the EM algorithm
+#' @param estpriormode logical, indicating whether to estimate the mode of the unimodal prior
+#' @param priormode specified prior mode (only works when estpriormode=FALSE).
+#'
+#' @return The fitted mixture prior (g) and convergence info
+#' 
+#' @export
+#' 
+est_prior = function(sehat,df,betahat,randomstart,singlecomp,unimodal,
                      prior,g,maxiter,estpriormode,priormode,completeobs){
+  
+  # Set up initial parameters
   if(!is.null(g)){
     maxiter = 1 # if g is specified, don't iterate the EM
     prior = rep(1,length(g$pi)) #prior is not actually used if g specified, but required to make sure EM doesn't produce warning
     l = length(g$pi)
   } else {   
-    mm = momentm(sehat[completeobs],df)
+    # use moment matching to initialize IG shape and rate
+    mm = est_singlecomp_mm(sehat[completeobs],df)
     mm$a = max(mm$a,1e-5)
     if(singlecomp==TRUE){
       alpha = mm$a
     }else{
+      # let alpha be a grid of values ranging from small to large
       if(mm$a>1){
         alpha = 1+((64/mm$a)^(1/6))^seq(-3,6)*(mm$a-1)
       }else{
         alpha = mm$a*2^seq(0,13)
       }
-      #alpha=alpha[alpha<=70] # avoid numerical error
     }
     mm$b = max(mm$b, 1e-5)
+    
     if(unimodal=='precision'){
       alpha = unique(pmax(alpha,1+1e-5)) # alpha<=1 not allowed
       beta = mm$b/(mm$a-1)*(alpha-1)
@@ -383,7 +577,6 @@ vash.core = function(sehat,df,betahat,randomstart,singlecomp,unimodal,
     }       
     l = length(alpha)
   }
-  
   
   if(is.null(prior)){
     prior = rep(1,l)
@@ -406,139 +599,10 @@ vash.core = function(sehat,df,betahat,randomstart,singlecomp,unimodal,
     stop("invalid prior specification")
   }
   
-  pi.fit.se = EMest_se(sehat[completeobs],g,prior,maxiter,df,unimodal,singlecomp,estpriormode)
-  return(pi.fit.se)
+  # fit the mixture prior
+  mix.fit = est_mixprop_mode(sehat[completeobs],g,prior,df,unimodal,singlecomp,estpriormode,maxiter)
+  return(mix.fit)
 }
 
 
 
-#' 
-#' @title  Main Variance Adaptive SHrinkage function
-#'
-#' @description Takes vectors of estimates (betahat) and their standard errors (sehat), and applies
-#' shrinkage to them, using Empirical Bayes methods, to compute shrunk estimates for beta.
-#'
-#' @details See readme for more details
-#' 
-#' @param sehat, a p vector of standard errors
-#' @param df: appropriate degrees of freedom for (chi-square) distribution of sehat
-#' @param betahat: a p vector of estimates
-#' @param randomstart: bool, indicating whether to initialize EM randomly. If FALSE, then initializes to prior mean (for EM algorithm) or prior (for VBEM)
-#' @param singlecomp: bool, indicating whether to use a single inverse-gamma distribution as the prior distribution for the variances
-#' @param unimodal: unimodal constraint for the prior distribution of the variances ("variance") or the precisions ("precision")
-#' @param prior: string, or numeric vector indicating Dirichlet prior on mixture proportions (defaults to "uniform", or 1,1...,1; also can be "nullbiased" 1,1/k-1,...,1/k-1 to put more weight on first component)
-#' @param g: the prior distribution for beta (usually estimated from the data; this is used primarily in simulated data to do computations with the "true" g)
-#' @param maxiter: maximum number of iterations of the EM algorithm
-#' @param estpriormode: bool, indicating whether to estimate the mode of the unimodal prior
-#' @param priormode: specified prior mode (only works when estpriormode=FALSE).
-#'
-#' @return a list with elements fitted.g is fitted mixture
-#' 
-#' @export
-#' 
-#' @examples 
-#' se = rigamma(100,1,1)
-#' sehat = se*rchisq(100,5)/5
-#' se.vash = vash(sehat,5)
-#' plot(sehat,se.vash$PosteriorMean,xlim=c(0,10),ylim=c(0,10))
-vash = function(sehat,df,
-                betahat=NULL,
-                randomstart=FALSE,   
-                singlecomp = FALSE,
-                unimodal = c("auto","variance","precision"),
-                prior=NULL,
-                g=NULL,
-                maxiter = 5000,
-                estpriormode = TRUE,
-                priormode = NULL){
-  
-  #method provides a convenient interface to set a particular combinations of parameters for prior an
-  #If method is supplied, use it to set up specific values for these parameters; provide warning if values
-  #are also specified by user
-  #If method is not supplied use the user-supplied values (or defaults if user does not specify them)
-  
-  
-  
-  if(missing(unimodal)){
-    unimodal = match.arg(unimodal) 
-  }
-  if(!is.element(unimodal,c("auto","variance","precision"))) stop("Error: invalid type of unimodal.")  
-  
-  completeobs = (!is.na(sehat))
-  n = sum(completeobs)
-  
-  # If some standard errors are almost 0, add a small pseudocount to prevent numerical errors
-  sehat[sehat==0] = min(min(sehat[sehat>0]),1e-6)
-  
-  if(n==0){
-    stop("Error: all input values are missing.")
-  }  
-  
-  if(unimodal=='auto' & !singlecomp){
-    pifit.prec = vash.core(sehat,df,betahat,randomstart,singlecomp,unimodal='precision',
-                          prior,g,maxiter,estpriormode,priormode,completeobs)
-    pifit.var = vash.core(sehat,df,betahat,randomstart,singlecomp,unimodal='variance',
-                          prior,g,maxiter,estpriormode,priormode,completeobs)
-    if (pifit.prec$loglik >= pifit.var$loglik){
-      pi.fit.se = pifit.prec
-      opt.unimodal = 'precision'
-    }else{
-      pi.fit.se = pifit.var
-      opt.unimodal = 'variance'
-    }
-  }else if(unimodal=='auto' & singlecomp){
-    pi.fit.se = vash.core(sehat,df,betahat,randomstart,singlecomp,unimodal='variance',
-                          prior,g,maxiter,estpriormode,priormode,completeobs)
-    opt.unimodal = NA
-  }else{
-    pi.fit.se = vash.core(sehat,df,betahat,randomstart,singlecomp,unimodal,
-                          prior,g,maxiter,estpriormode,priormode,completeobs)
-    opt.unimodal = NA
-  }
-  
-  post.se = post.igmix(pi.fit.se$g,rep(numeric(0),n),sehat[completeobs],df)
-  postpi.se = t(matrix(rep(pi.fit.se$g$pi,length(sehat)),ncol=length(sehat)))
-  postpi.se[completeobs,] = t(comppostprob(pi.fit.se$g,rep(numeric(0),n),sehat[completeobs],df))
-  
-  PosteriorMean.se = rep(pi.fit.se$g$c,length=length(sehat))
-  #PosteriorSD.se = rep(0,length=n)
-  
-  
-  #PosteriorSD.se[completeobs] = postsd(pi.fit.se$g,NULL,sehat[completeobs],df) 
-  PosteriorShape.se = t(matrix(rep(pi.fit.se$g$alpha,length(sehat)),ncol=length(sehat)))
-  PosteriorShape.se[completeobs,] = post.se$alpha
-  PosteriorRate.se = t(matrix(rep(pi.fit.se$g$beta,length(sehat)),ncol=length(sehat)))
-  PosteriorRate.se[completeobs,] = post.se$beta
-  
-  #PosteriorMean.se[completeobs] = sqrt(postmean(pi.fit.se$g,rep(numeric(0),n),sehat[completeobs],df))
-  #PosteriorMean.se = sqrt(apply(postpi.se*PosteriorRate.se/PosteriorShape.se,1,sum))
-  PosteriorMean.se[completeobs] = sqrt(1/apply(postpi.se*PosteriorShape.se/PosteriorRate.se,1,sum))
-
-  
-  if(length(betahat)==n){
-    pvalue = mod_t_test(betahat,sqrt(PosteriorRate.se/PosteriorShape.se),
-                      postpi.se,PosteriorShape.se*2)
-    qvalue = qvalue(pvalue)$qval
-  }else if(length(betahat)==0){
-    pvalue = NULL
-    qvalue = NULL
-  }else{
-    warning("betahat has different length as sehat, cannot compute moderated t-tests")
-    pvalue = NULL
-    qvalue = NULL
-  }
-  
-  result = list(fitted.g=pi.fit.se$g,
-                PosteriorMean=PosteriorMean.se,
-                #PosteriorSD=PosteriorSD.se,
-                PosteriorShape=PosteriorShape.se,
-                PosteriorRate=PosteriorRate.se,
-                PosteriorPi=postpi.se,
-                pvalue=pvalue,
-                qvalue=qvalue,
-                unimodal=unimodal,
-                opt.unimodal=opt.unimodal,
-                fit=pi.fit.se,call=match.call(),data=list(sehat=sehat))
-  class(result) = "vash"
-  return(result)
-}
