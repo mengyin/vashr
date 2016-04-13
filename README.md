@@ -1,6 +1,6 @@
 This repository contains an R package for performing "Variance Adaptive Shrinkage"
 
-To install the ashr package first you need to install devtools
+To install the vashr package first you need to install devtools
 ```
 install.packages("devtools")
 library(devtools)
