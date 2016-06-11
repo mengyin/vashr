@@ -1,50 +1,59 @@
 #' @title  Main Variance Adaptive SHrinkage function
 #'
-#' @description Takes vectors of standard errors (sehat), and applies shrinkage to them, 
-#' using Empirical Bayes methods, to compute shrunk estimates for variances.
+#' @description Takes vectors of standard errors (sehat), and applies shrinkage to them, using Empirical Bayes methods, to compute shrunk estimates for variances.
 #'
-#' @details See readme for more details
+#' @details See vignette for more details.
 #' 
 #' @param sehat a p vector of observed standard errors
-#' @param df appropriate degrees of freedom for (chi-square) distribution of sehat
+#' @param df scalar, appropriate degree of freedom for (chi-square) distribution of sehat
 #' @param betahat a p vector of estimates (optional)
 #' @param randomstart logical, indicating whether to initialize EM randomly. If FALSE, then initializes to prior mean (for EM algorithm) or prior (for VBEM)
 #' @param singlecomp logical, indicating whether to use a single inverse-gamma distribution as the prior distribution for the variances
-#' @param unimodal put unimodal constraint on the prior distribution of variances ("variance") or precisions ("precision")
+#' @param unimodal put unimodal constraint on the prior distribution of variances ("variance") or precisions ("precision"). This also can be automatically chosen ("auto") by comparing the likelihoods.
 #' @param prior string, or numeric vector indicating Dirichlet prior on mixture proportions (defaults to "uniform", or 1,1...,1; also can be "nullbiased" 1,1/k-1,...,1/k-1 to put more weight on first component)
 #' @param g the prior distribution for variances (usually estimated from the data; this is used primarily in simulated data to do computations with the "true" g)
-#' @param maxiter maximum number of iterations of the EM algorithm
 #' @param estpriormode logical, indicating whether to estimate the mode of the unimodal prior
 #' @param priormode specified prior mode (only works when estpriormode=FALSE).
+#' @param scale a scalar or a p vector, such that sehat/scale are exchangeable, i.e, can be modeled by a common unimodal prior. 
+#' @param maxiter maximum number of iterations of the EM algorithm
 #'
 #' @return vash returns an object of \code{\link[base]{class}} "vash", a list with the following elements
-#' \item{fitted.g}{fitted mixture prior}
+#' \item{fitted.g}{Fitted mixture prior}
 #' \item{sd.post}{A vector consisting the posterior estimate of standard deviations (square root of variances) from the mixture}
 #' \item{PosteriorPi}{A p*k matrix consisting the mixture proportions of the posterior distribution of variance (k is number of mixture components)}
 #' \item{PosteriorShape}{A p*k matrix consisting the shape parameters of the inverse-gamma posterior distribution of variance (k is number of mixture components)}
 #' \item{PosteriorRate}{A p*k matrix consisting the rate parameters of the inverse-gamma posterior distribution of variance (k is number of mixture components)}
-#' \item{pvalue}{A vector p-values}
+#' \item{pvalue}{A vector of p-values}
 #' \item{qvalue}{A vector of q-values}
 #' \item{fit}{The fitted mixture object}
-#' \item{unimodal}{denoting whether unimodal variance prior or unimodal precision prior has been used}
-#' \item{opt.unimodal}{denoting whether unimodal variance prior or unimodal precision prior model gets higher likelihood}
-#' \item{call}{a call in which all of the specified arguments are specified by their full names}
-#' \item{data}{a list consisting the input sehat}
+#' \item{unimodal}{Denoting whether unimodal variance prior or unimodal precision prior has been used}
+#' \item{opt.unimodal}{Denoting whether unimodal variance prior or unimodal precision prior model gets higher likelihood}
+#' \item{call}{A call in which all of the specified arguments are specified by their full names}
+#' \item{data}{A list consisting the input sehat, df and betahat}
 #' 
 #' @export
 #' 
 #' @examples 
-#' var = 1/rgamma(100,5,5)
-#' sehat = sqrt(var*rchisq(100,7)/7)
-#' se.vash = vash(sehat,df=7)
-#' plot(sehat, se.vash$sd.post, xlim=c(0,10), ylim=c(0,10))
+#' ##An simple example
+#' #generate true variances (sd^2) from an inverse-gamma prior
+#' sd = sqrt(1/rgamma(100,5,5)) 
+#' #observed standard errors are estimates of true sd's
+#' sehat = sqrt(sd^2*rchisq(100,7)/7) 
+#' #run the vash function
+#' fit = vash(sehat,df=7) 
+#' #plot the shrunk sd estimates against the observed standard errors
+#' plot(sehat, fit$sd.post, xlim=c(0,10), ylim=c(0,10)) 
 #' 
-#' #Running vash with a pre-specified g, rather than estimating it
-#' var = c(rigamma(100,5,4),rigmma(100,10,9))
-#' sehat = sqrt(var*rchisq(100,7)/7)
+#' ##Running vash with a pre-specified g, rather than estimating it
+#' sd = sqrt(c(1/rgamma(100,5,4),1/rgamma(100,10,9)))
+#' sehat = sqrt(sd^2*rchisq(100,7)/7)
 #' true_g = igmix(c(0.5,0.5),c(5,10),c(4,9)) # define true g 
-#' #Passing this g into vash causes it to i) take the shape and the rate for each component from this g, and ii) initialize pi to the value from this g.
+#' #Passing this g into vash causes it to i) take the shape and the rate for each component from this g, 
+#' #and ii) initialize pi to the value from this g.
 #' se.vash = vash(sehat, df=7, g=true_g)
+#' 
+#' @references Lu, M., & Stephens, M. (2016). Variance Adaptive Shrinkage (vash): Flexible Empirical Bayes estimation of variances. bioRxiv, 048660.
+#' 
 vash = function(sehat, df,
                 betahat = NULL,
                 randomstart = FALSE,   
@@ -52,9 +61,10 @@ vash = function(sehat, df,
                 unimodal = c("auto","variance","precision"),
                 prior = NULL,
                 g = NULL,
-                maxiter = 5000,
                 estpriormode = TRUE,
-                priormode = NULL){
+                priormode = NULL,
+                scale = 1,
+                maxiter = 5000){
   
   ## 1.Handling Input Parameters
   
@@ -65,10 +75,15 @@ vash = function(sehat, df,
     unimodal = match.arg(unimodal) 
   }
   if(!is.element(unimodal,c("auto","variance","precision"))) stop("Error: invalid type of unimodal.")  
+  if(!missing(betahat) & length(betahat)!=length(sehat)) stop("Error: sehat and betahat must have same lengths.")
+  if(!missing(g) & class(g)!="igmix") stop("Error: invalid type of g.")
+  if(!is.numeric(df) | length(df)>1) stop("Error: invalid type of df.")
   
   # Set observations with infinite standard errors to missing
   # later these missing observations will be ignored in EM, and posterior will be same as prior.
   sehat[sehat==Inf] = NA
+  sehat = sehat/scale
+  if(min(sehat)<0) stop("Error: sehat/scale must be non-negative.")
   completeobs = (!is.na(sehat))
   n = sum(completeobs)
   
@@ -106,6 +121,8 @@ vash = function(sehat, df,
     opt.unimodal = NA
   }
   
+  ## 3. Posterior inference
+  # compute posterior distribution
   post.se = post.igmix(mix.fit$g,rep(numeric(0),n),sehat[completeobs],df)
   postpi.se = t(matrix(rep(mix.fit$g$pi,length(sehat)),ncol=length(sehat)))
   postpi.se[completeobs,] = t(comppostprob(mix.fit$g,rep(numeric(0),n),sehat[completeobs],df))
@@ -119,9 +136,10 @@ vash = function(sehat, df,
   
   PosteriorMean.se[completeobs] = sqrt(1/apply(postpi.se*PosteriorShape.se/PosteriorRate.se,1,sum))
   
-  
+  # obtain p-values by moderated t-test
+  # and then compute q-values from the p-values
   if(length(betahat)==n){
-    pvalue = mod_t_test(betahat,sqrt(PosteriorRate.se/PosteriorShape.se),
+    pvalue = mod_t_test(betahat,scale*sqrt(PosteriorRate.se/PosteriorShape.se),
                         postpi.se,PosteriorShape.se*2)
     qvalue = qvalue(pvalue)$qval
   }else if(length(betahat)==0){
@@ -142,7 +160,7 @@ vash = function(sehat, df,
                 qvalue=qvalue,
                 unimodal=unimodal,
                 opt.unimodal=opt.unimodal,
-                fit=mix.fit,call=match.call(),data=list(sehat=sehat))
+                fit=mix.fit,call=match.call(),data=list(sehat=sehat,betahat=betahat,df=df))
   class(result) = "vash"
   return(result)
 }
@@ -190,7 +208,8 @@ loglike = function(sehat,df,pi,alpha,beta){
   return(logl)
 }
 
-#' @title Estimate mixture proportions and mode of the unimodal mixture prior
+#' @title Estimate mixture proportions and mode of the unimodal inverse-gaama mixture variance prior.
+#' @description Estimate mixture proportions and mode of the unimodal inverse-gaama mixture variance prior.
 #'
 #' @param sehat n vector of standard errors of observations
 #' @param g the prior distribution for variances (usually estimated from the data)
@@ -284,11 +303,12 @@ IGmixEM = function(sehat, v, c.init, alpha.vec, pi.init, prior, unimodal,singlec
 
 
 #' @title Estimate the single component inverse-gamma prior by matching the moments
+#' @description Estimate the single component inverse-gamma prior by matching the moments.
 #'
 #' @param sehat n vector of standard errors of observations
 #' @param df degrees of freedom for chi-square distribution of sehat^2
 #' 
-#' @return The shape and rate of the inverse-gamma prior 
+#' @return The shape (a) and rate (b) of the fitted inverse-gamma prior 
 #' 
 #' @export
 #' 
@@ -495,13 +515,14 @@ post.igmix = function(m,betahat,sebetahat,v){
 
 #' 
 #' @title Moderated t-test with standard errors moderated by mixture prior
+#' @description Moderated t-test with standard errors moderated by mixture prior. 
 #' 
 #' @param betahat a p vector of observed effect sizes
 #' @param se a p*k matrix of moderated standard errors
 #' @param pi a p*k matrix of mixture proportions
 #' @param df a p*k matrix of degrees of freedom
 #'
-#' @return A p vector of p-values
+#' @return A p vector of p-values testing if the effect sizes are 0. 
 #' 
 #' @export
 #' 
@@ -518,6 +539,7 @@ mod_t_test=function(betahat,se,pi,df){
 
 #' 
 #' @title Fit the mixture inverse-gamma prior of variance
+#' @description Fit the mixture inverse-gamma prior of variance, given the variance estimates (sehat^2). 
 #' 
 #' @param sehat a p vector of observed standard errors
 #' @param df appropriate degrees of freedom for (chi-square) distribution of sehat
@@ -530,13 +552,14 @@ mod_t_test=function(betahat,se,pi,df){
 #' @param maxiter maximum number of iterations of the EM algorithm
 #' @param estpriormode logical, indicating whether to estimate the mode of the unimodal prior
 #' @param priormode specified prior mode (only works when estpriormode=FALSE).
+#' @param completeobs a p vector of non-missing flags
 #'
 #' @return The fitted mixture prior (g) and convergence info
 #' 
 #' @export
 #' 
-est_prior = function(sehat,df,betahat,randomstart,singlecomp,unimodal,
-                     prior,g,maxiter,estpriormode,priormode,completeobs){
+est_prior = function(sehat, df, betahat, randomstart, singlecomp, unimodal,
+                     prior, g, maxiter, estpriormode, priormode, completeobs){
   
   # Set up initial parameters
   if(!is.null(g)){
@@ -580,6 +603,18 @@ est_prior = function(sehat,df,betahat,randomstart,singlecomp,unimodal,
   
   if(is.null(prior)){
     prior = rep(1,l)
+  }else{
+    if(!is.numeric(prior)){
+      if(prior=="nullbiased"){ # set up prior to favour "null"
+        prior = rep(1,l)
+        prior[null.comp] = l-1 #prior 10-1 in favour of null by default
+      }else if(prior=="uniform"){
+        prior = rep(1,l)
+      }
+    }
+    if(length(prior)!=l | !is.numeric(prior)){
+      stop("Error: invalid prior specification")
+    }
   }
   
   if(randomstart){
@@ -593,10 +628,6 @@ est_prior = function(sehat,df,betahat,randomstart,singlecomp,unimodal,
     g = igmix(g$pi,g$alpha,g$beta)
   }else{
     g = igmix(pi.se,alpha,beta)
-  }
-  
-  if(length(prior)!=l){
-    stop("invalid prior specification")
   }
   
   # fit the mixture prior

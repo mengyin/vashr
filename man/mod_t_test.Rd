@@ -16,6 +16,9 @@ mod_t_test(betahat, se, pi, df)
 \item{df}{a p*k matrix of degrees of freedom}
 }
 \value{
-A p vector of p-values
+A p vector of p-values testing if the effect sizes are 0.
+}
+\description{
+Moderated t-test with standard errors moderated by mixture prior.
 }
 

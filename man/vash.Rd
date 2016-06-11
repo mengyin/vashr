@@ -6,12 +6,12 @@
 \usage{
 vash(sehat, df, betahat = NULL, randomstart = FALSE, singlecomp = FALSE,
   unimodal = c("auto", "variance", "precision"), prior = NULL, g = NULL,
-  maxiter = 5000, estpriormode = TRUE, priormode = NULL)
+  estpriormode = TRUE, priormode = NULL, scale = 1, maxiter = 5000)
 }
 \arguments{
 \item{sehat}{a p vector of observed standard errors}
 
-\item{df}{appropriate degrees of freedom for (chi-square) distribution of sehat}
+\item{df}{scalar, appropriate degree of freedom for (chi-square) distribution of sehat}
 
 \item{betahat}{a p vector of estimates (optional)}
 
@@ -19,17 +19,19 @@ vash(sehat, df, betahat = NULL, randomstart = FALSE, singlecomp = FALSE,
 
 \item{singlecomp}{logical, indicating whether to use a single inverse-gamma distribution as the prior distribution for the variances}
 
-\item{unimodal}{put unimodal constraint on the prior distribution of variances ("variance") or precisions ("precision")}
+\item{unimodal}{put unimodal constraint on the prior distribution of variances ("variance") or precisions ("precision"). This also can be automatically chosen ("auto") by comparing the likelihoods.}
 
 \item{prior}{string, or numeric vector indicating Dirichlet prior on mixture proportions (defaults to "uniform", or 1,1...,1; also can be "nullbiased" 1,1/k-1,...,1/k-1 to put more weight on first component)}
 
 \item{g}{the prior distribution for variances (usually estimated from the data; this is used primarily in simulated data to do computations with the "true" g)}
 
-\item{maxiter}{maximum number of iterations of the EM algorithm}
-
 \item{estpriormode}{logical, indicating whether to estimate the mode of the unimodal prior}
 
 \item{priormode}{specified prior mode (only works when estpriormode=FALSE).}
+
+\item{scale}{a scalar or a p vector, such that sehat/scale are exchangeable, i.e, can be modeled by a common unimodal prior.}
+
+\item{maxiter}{maximum number of iterations of the EM algorithm}
 }
 \value{
 vash returns an object of \code{\link[base]{class}} "vash", a list with the following elements
@@ -47,23 +49,32 @@ vash returns an object of \code{\link[base]{class}} "vash", a list with the foll
 \item{data}{a list consisting the input sehat}
 }
 \description{
-Takes vectors of standard errors (sehat), and applies shrinkage to them, 
-using Empirical Bayes methods, to compute shrunk estimates for variances.
+Takes vectors of standard errors (sehat), and applies shrinkage to them, using Empirical Bayes methods, to compute shrunk estimates for variances.
 }
 \details{
-See readme for more details
+See vignette for more details.
 }
 \examples{
-var = 1/rgamma(100,5,5)
-sehat = sqrt(var*rchisq(100,7)/7)
-se.vash = vash(sehat,df=7)
-plot(sehat, se.vash$sd.post, xlim=c(0,10), ylim=c(0,10))
+##An simple example
+#generate true variances (sd^2) from an inverse-gamma prior
+sd = sqrt(1/rgamma(100,5,5)) 
+#observed standard errors are estimates of true sd's
+sehat = sqrt(sd^2*rchisq(100,7)/7) 
+#run the vash function
+fit = vash(sehat,df=7) 
+#plot the shrunk sd estimates against the observed standard errors
+plot(sehat, fit$sd.post, xlim=c(0,10), ylim=c(0,10)) 
 
-#Running vash with a pre-specified g, rather than estimating it
-var = c(rigamma(100,5,4),rigmma(100,10,9))
-sehat = sqrt(var*rchisq(100,7)/7)
+##Running vash with a pre-specified g, rather than estimating it
+sd = sqrt(c(1/rgamma(100,5,4),1/rgamma(100,10,9)))
+sehat = sqrt(sd^2*rchisq(100,7)/7)
 true_g = igmix(c(0.5,0.5),c(5,10),c(4,9)) # define true g 
-#Passing this g into vash causes it to i) take the shape and the rate for each component from this g, and ii) initialize pi to the value from this g.
+#Passing this g into vash causes it to i) take the shape and the rate for each component from this g, 
+#and ii) initialize pi to the value from this g.
 se.vash = vash(sehat, df=7, g=true_g)
+
+}
+\references{
+Lu, M., & Stephens, M. (2016). Variance Adaptive Shrinkage (vash): Flexible Empirical Bayes estimation of variances. bioRxiv, 048660.
 }
 

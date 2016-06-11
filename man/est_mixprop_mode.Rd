@@ -2,7 +2,7 @@
 % Please edit documentation in R/vash.R
 \name{est_mixprop_mode}
 \alias{est_mixprop_mode}
-\title{Estimate mixture proportions and mode of the unimodal mixture prior}
+\title{Estimate mixture proportions and mode of the unimodal inverse-gaama mixture variance prior.}
 \usage{
 est_mixprop_mode(sehat, g, prior, df, unimodal, singlecomp, estpriormode,
   maxiter = 5000)
@@ -26,5 +26,8 @@ est_mixprop_mode(sehat, g, prior, df, unimodal, singlecomp, estpriormode,
 }
 \value{
 A list, including the final loglikelihood, the fitted prior g, number of iterations and a flag to indicate convergence.
+}
+\description{
+Estimate mixture proportions and mode of the unimodal inverse-gaama mixture variance prior.
 }
 

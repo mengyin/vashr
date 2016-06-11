@@ -1,58 +1,122 @@
 ---
-title: "Vignette Title"
-author: "Vignette Author"
+title: "Variance adaptive shrinkage - the vashr package"
+author: | 
+  | Mengyin Lu, Matthew Stephens
+  | Department of Statistics, University of Chicago
+  | mengyin@uchicago.edu, mstephens@uchicago.edu
 date: "`r Sys.Date()`"
+bibliography: vig.bib
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteIndexEntry{Variance adaptive shrinkage - the vashr package}
   %\VignetteEngine{knitr::rmarkdown}
   \usepackage[utf8]{inputenc}
 ---
 
-Vignettes are long form documentation commonly included in packages. Because they are part of the distribution of the package, they need to be as compact as possible. The `html_vignette` output type provides a custom style sheet (and tweaks some options) to ensure that the resulting html is as small as possible. The `html_vignette` format:
+## Introduction
+This package provides flexible estimation of variances using Empirical Bayes models [@lu2016vash]. Suppose we observe some raw variance estimates $\hat{s}_1^2,...,\hat{s}_J^2$ that are estimates of underlying "true" variances $s_1^2,...,s_J^2$: 
+\[\hat{s}_j^2|s_j^2 \sim s_j^2 \frac{\chi^2_{d_j}}{d_j},\]
+where the degree of freedom $d_j$ depends on the sample size. 
 
-- Never uses retina figures
-- Has a smaller default figure size
-- Uses a custom CSS stylesheet instead of the default Twitter Bootstrap style
+Given the observed standard errors and degree of freedom. We use an Empirical Bayes approach to estimate the prior distribution $g$ (an unimodal mixture of inverse-gamma distributions) of the variances:
+\[s_j\sim g(\cdot).\]
 
-## Vignette Info
+The posterior shrunk estimate for $s_j$:
+\[\tilde{s}_j = E(s_j|\hat{s}_1^2,...,\hat{s}_J^2, \hat{g})\]
+is provided in this package. 
 
-Note the various macros within the `vignette` setion of the metadata block above. These are required in order to instruct R how to build the vignette. Note that you should change the `title` field and the `\VignetteIndexEntry` to match the title of your vignette.
-
-## Styles
-
-The `html_vignette` template includes a basic CSS theme. To override this theme you can specify your own CSS in the document metadata as follows:
-
-    output: 
-      rmarkdown::html_vignette:
-        css: mystyles.css
-
-## Figures
-
-The figure sizes have been customised so that you can easily put two images side-by-side. 
-
-```{r, fig.show='hold'}
-plot(1:10)
-plot(10:1)
+## A simple simulation example
+We simulate $s_1^2,...,s_J^2$ and $\hat{s}_1^2,...,\hat{s}_J^2$ from the above models:
+```{r}
+#generate true variances (sd^2) from an inverse-gamma prior
+sd <- sqrt(1/rgamma(100,5,5)) 
+#observed standard errors are estimates of true sd's
+sehat <- sqrt(sd^2*rchisq(100,7)/7) 
 ```
 
-You can enable figure captions by `fig_caption: yes` in YAML:
-
-    output:
-      rmarkdown::html_vignette:
-        fig_caption: yes
-
-Then you can use the chunk option `fig.cap = "Your figure caption."` in **knitr**.
-
-## More Examples
-
-You can write math expressions, e.g. $Y = X\beta + \epsilon$, footnotes^[A footnote here.], and tables, e.g. using `knitr::kable()`.
-
-```{r, echo=FALSE, results='asis'}
-knitr::kable(head(mtcars, 10))
+Then use the main function "vash" to obtain $\tilde{s}_j$, the posterior estimate of $s_j$:
+```{r,message=FALSE}
+library(vashr)
+#run the vash function
+fit <- vash(sehat,df=7) 
+#vash provides the shrunk estimates
+plot(sehat, fit$sd.post, 
+     xlab=expression(paste("observed standard errors ",hat(s)[j])), 
+     ylab=expression(paste("posterior estimates ",tilde(s)[j]))) 
+abline(0,1,lty=2)
 ```
 
-Also a quote using `>`:
+The fitted unimodal inverse-gamma mixture prior $g$ can be checked by:
+```{r}
+fit$fitted.g
+```
+where "pi", "alpha", "beta" and "c" are the mixture proportions, component-wise shape parameters, component-wise rate parameters and uni-mode respectively. 
 
-> "He who gives up [code] safety for [code] speed deserves neither."
-([via](https://twitter.com/hadleywickham/status/504368538874703872))
+## Application example: differential expression analysis (microarray data)
+We use the following example to demonstrate how to incoporate our variance estimates into the widely used differential expression analysis pipeline, $limma$ [@smyth2005limma]:
+
+The following microarray data are available from the R package $ecoliLeucine$. The experimental details were reported in [@salmon2003global]:
+
+> "The purpose of the work presented here is to identify the network of genes that are differentially regulated by the global E. coli regulatory protein, leucine-responsive regulatory protein (Lrp), during steady state growth in a glucose supplemented minimal salts medium. Lrp is a DNA-binding protein that has been reported to affect the expression of approximately 55 genes."
+
+Gene expression in two E. coli bacteria strains, labelled lrp+ and lrp-, were compared using eight Affymetrix ecoli chips, four chips each for lrp+ and lrp-. Here we perform differential expression analysis between the lrp+ and lrp- strains using the $limma$ package: 
+```{r,message=FALSE}
+library(affy)
+library(ecoliLeucine)
+library(limma)
+data("ecoliLeucine")
+eset <- rma(ecoliLeucine)
+strain <- c("lrp-","lrp-","lrp-","lrp-","lrp+","lrp+","lrp+","lrp+")
+design <- model.matrix(~factor(strain))
+colnames(design) <- c("lrp-","lrp+vs-")
+fit <- lmFit(eset, design)
+fit <- eBayes(fit)
+topTable(fit)
+```
+
+Then we moderate the variance estimates of limma by our variance estimates, and compute the moderated gene-specific p-values:
+```{r}
+library(vashr)
+betahat <- fit$coefficients[,2]
+sehat <- fit$stdev.unscaled[,2]*fit$sigma
+fit.vash <- vash(sehat=sehat, df=fit$df.residual[1], betahat=betahat)
+
+# compare the gene-specific p-values of limma and vash
+plot(fit$p.value[,2], fit.vash$pvalue,
+     xlab="limma p-values", ylab="vash p-values")
+```
+
+## Application example: differential expression analysis (RNA-seq data)
+We use the "pasilla" dataset to demonstrate the usage of this package for RNA-seq differential expression analysis (data available from the R package $pasilla$). This RNA-seq dataset is from an experiment on Drosophila melanogaster cell cultures and investigated the effect of RNAi knock-down of the splicing factor pasilla [@brooks2011pasilla].
+
+We use the pipeline suggested in [@law2014voom], $voom+limma$, to perform differential expression analysis between the two conditions "treated" and "untreated": first use the $voom$ transformation to transform RNA-seq read counts into continuous response (log-cpm), then fit weighted least squares regressions to estimate effects  and the de-trended gene-specific variances, and finally use the standard limma pipeline to shrink the de-trended variances.
+```{r}
+library("pasilla")
+library("Biobase")
+library("edgeR")
+data("pasillaGenes")
+countData <- counts(pasillaGenes)
+colData <- pData(pasillaGenes)[,c("condition","type")]
+dgecounts <- DGEList(counts=countData, group=factor(colData$condition))
+dgecounts <- calcNormFactors(dgecounts)
+design <- model.matrix(~colData$condition)
+v <- voom(dgecounts,design,plot=FALSE) # voom transformation
+fit <- lmFit(v) # fit coefficients
+fit <- eBayes(fit) # EB estimation of limma
+topTable(fit)
+```
+
+We can moderate the de-trended variance estimates of $voom+limma$ by our variance estimates and obtain the moderated gene-specific p-values by following commands:
+```{r}
+library(vashr)
+betahat <- fit$coefficients[,2]
+sehat <- fit$stdev.unscaled[,2]*fit$sigma
+fit.vash <- vash(sehat=sehat, df=fit$df.residual[1], 
+                 betahat=betahat, scale=fit$stdev.unscaled[,2])
+
+# compare the gene-specific p-values of limma and vash
+plot(fit$p.value[,2], fit.vash$pvalue,
+     xlab="voom+limma p-values", ylab="vash p-values")
+```
+
+## Reference

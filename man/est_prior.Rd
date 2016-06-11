@@ -29,8 +29,13 @@ est_prior(sehat, df, betahat, randomstart, singlecomp, unimodal, prior, g,
 \item{estpriormode}{logical, indicating whether to estimate the mode of the unimodal prior}
 
 \item{priormode}{specified prior mode (only works when estpriormode=FALSE).}
+
+\item{completeobs}{a p vector of non-missing flags}
 }
 \value{
 The fitted mixture prior (g) and convergence info
+}
+\description{
+Fit the mixture inverse-gamma prior of variance, given the variance estimates (sehat^2).
 }
 

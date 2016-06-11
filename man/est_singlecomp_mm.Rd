@@ -12,6 +12,9 @@ est_singlecomp_mm(sehat, df)
 \item{df}{degrees of freedom for chi-square distribution of sehat^2}
 }
 \value{
-The shape and rate of the inverse-gamma prior
+The shape (a) and rate (b) of the fitted inverse-gamma prior
+}
+\description{
+Estimate the single component inverse-gamma prior by matching the moments.
 }
 
