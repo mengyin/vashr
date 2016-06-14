@@ -2,7 +2,7 @@
 % Please edit documentation in R/vash.R
 \name{est_singlecomp_mm}
 \alias{est_singlecomp_mm}
-\title{Estimate the single component inverse-gamma prior by matching the moments}
+\title{Estimate the single component inverse-gamma prior of variances by matching the moments}
 \usage{
 est_singlecomp_mm(sehat, df)
 }
@@ -15,6 +15,14 @@ est_singlecomp_mm(sehat, df)
 The shape (a) and rate (b) of the fitted inverse-gamma prior
 }
 \description{
-Estimate the single component inverse-gamma prior by matching the moments.
+Suppose the true variances come from a single component inverse-gamma prior, and 
+standard errors (noisy estimates of the square root of true variances) are observed.
+This function estimates the single component inverse-gamma prior of variances by matching the moments.
+}
+\examples{
+sd = sqrt(1/rgamma(100,5,5)) #true prior: IG(5,5)
+sehat = sqrt(sd^2*rchisq(100,7)/7) 
+est_singlecomp_mm(sehat=sehat,df=7) 
+
 }
 

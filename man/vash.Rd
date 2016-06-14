@@ -35,18 +35,18 @@ vash(sehat, df, betahat = NULL, randomstart = FALSE, singlecomp = FALSE,
 }
 \value{
 vash returns an object of \code{\link[base]{class}} "vash", a list with the following elements
-\item{fitted.g}{fitted mixture prior}
+\item{fitted.g}{Fitted mixture prior}
 \item{sd.post}{A vector consisting the posterior estimate of standard deviations (square root of variances) from the mixture}
 \item{PosteriorPi}{A p*k matrix consisting the mixture proportions of the posterior distribution of variance (k is number of mixture components)}
 \item{PosteriorShape}{A p*k matrix consisting the shape parameters of the inverse-gamma posterior distribution of variance (k is number of mixture components)}
 \item{PosteriorRate}{A p*k matrix consisting the rate parameters of the inverse-gamma posterior distribution of variance (k is number of mixture components)}
-\item{pvalue}{A vector p-values}
+\item{pvalue}{A vector of p-values}
 \item{qvalue}{A vector of q-values}
 \item{fit}{The fitted mixture object}
-\item{unimodal}{denoting whether unimodal variance prior or unimodal precision prior has been used}
-\item{opt.unimodal}{denoting whether unimodal variance prior or unimodal precision prior model gets higher likelihood}
-\item{call}{a call in which all of the specified arguments are specified by their full names}
-\item{data}{a list consisting the input sehat}
+\item{unimodal}{Denoting whether unimodal variance prior or unimodal precision prior has been used}
+\item{opt.unimodal}{Denoting whether unimodal variance prior or unimodal precision prior model gets higher likelihood}
+\item{call}{A call in which all of the specified arguments are specified by their full names}
+\item{data}{A list consisting the input sehat, df and betahat}
 }
 \description{
 Takes vectors of standard errors (sehat), and applies shrinkage to them, using Empirical Bayes methods, to compute shrunk estimates for variances.

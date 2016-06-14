@@ -23,4 +23,9 @@ log-likehihood
 \description{
 Suppose we observe standard errors sehat, where \eqn{sehat^2~s^2 \times \chi^2_{df}/df}, and $s^2$ comes from an inverse-gamma mixture prior. This function computes the log-likelihood of the model.
 }
+\examples{
+sehat = abs(rnorm(10))
+loglike(sehat, df=10, pi=c(0.1,0.3,0.5), alpha=c(5,8,10), beta=c(2,4,9))
+
+}
 

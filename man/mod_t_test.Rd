@@ -11,7 +11,7 @@ mod_t_test(betahat, se, pi, df)
 
 \item{se}{a p*k matrix of moderated standard errors}
 
-\item{pi}{a p*k matrix of mixture proportions}
+\item{pi}{a p*k matrix of mixture proportions, row sums are 1.}
 
 \item{df}{a p*k matrix of degrees of freedom}
 }
@@ -20,5 +20,14 @@ A p vector of p-values testing if the effect sizes are 0.
 }
 \description{
 Moderated t-test with standard errors moderated by mixture prior.
+}
+\examples{
+# p=10, k=5
+betahat = rnorm(10)
+se = matrix(abs(rnorm(10*5)), ncol=5)
+pi = matrix(rep(0.2,10*5), ncol=5)
+df = matrix(rep(11:15,each=10), ncol=5)
+mod_t_test(betahat,se,pi,df)
+
 }
 

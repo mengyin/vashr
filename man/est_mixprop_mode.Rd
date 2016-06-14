@@ -10,9 +10,9 @@ est_mixprop_mode(sehat, g, prior, df, unimodal, singlecomp, estpriormode,
 \arguments{
 \item{sehat}{n vector of standard errors of observations}
 
-\item{g}{the prior distribution for variances (usually estimated from the data)}
+\item{g}{the initial prior distribution for variances}
 
-\item{prior}{string, or numeric vector indicating Dirichlet prior on mixture proportions (defaults to "uniform", or (1,1...,1))}
+\item{prior}{numeric vector indicating Dirichlet prior on mixture proportions}
 
 \item{df}{appropriate degrees of freedom for chi-square distribution of sehat^2}
 
@@ -29,5 +29,10 @@ A list, including the final loglikelihood, the fitted prior g, number of iterati
 }
 \description{
 Estimate mixture proportions and mode of the unimodal inverse-gaama mixture variance prior.
+}
+\examples{
+fitted.prior = est_mixprop_mode(sehat=abs(rnorm(100)),g=igmix(c(.5,.5),c(1,3),c(1,3)),
+prior=c(1,1),df=10,unimodal="variance",singlecomp=FALSE,estpriormode=TRUE)
+
 }
 

@@ -1,3 +1,4 @@
+#' @import ashr qvalue SQUAREM
 #' @title  Main Variance Adaptive SHrinkage function
 #'
 #' @description Takes vectors of standard errors (sehat), and applies shrinkage to them, using Empirical Bayes methods, to compute shrunk estimates for variances.
@@ -194,6 +195,10 @@ getA = function(n,k,v,alpha.vec,modalpha.vec,sehat){
 #'
 #' @return log-likehihood
 #' 
+#' @examples 
+#' sehat = abs(rnorm(10))
+#' loglike(sehat, df=10, pi=c(0.1,0.3,0.5), alpha=c(5,8,10), beta=c(2,4,9))
+#' 
 #' @export
 #' 
 loglike = function(sehat,df,pi,alpha,beta){
@@ -212,8 +217,8 @@ loglike = function(sehat,df,pi,alpha,beta){
 #' @description Estimate mixture proportions and mode of the unimodal inverse-gaama mixture variance prior.
 #'
 #' @param sehat n vector of standard errors of observations
-#' @param g the prior distribution for variances (usually estimated from the data)
-#' @param prior string, or numeric vector indicating Dirichlet prior on mixture proportions (defaults to "uniform", or (1,1...,1))
+#' @param g the initial prior distribution for variances
+#' @param prior numeric vector indicating Dirichlet prior on mixture proportions
 #' @param df appropriate degrees of freedom for chi-square distribution of sehat^2
 #' @param unimodal put unimodal constraint on the prior distribution of variances ("variance") or precisions ("precision")
 #' @param singlecomp logical, indicating whether to use a single inverse-gamma distribution as the prior distribution for the variances
@@ -221,6 +226,10 @@ loglike = function(sehat,df,pi,alpha,beta){
 #' @param maxiter maximum number of iterations of the EM algorithm
 #' 
 #' @return A list, including the final loglikelihood, the fitted prior g, number of iterations and a flag to indicate convergence.
+#' 
+#' @examples 
+#' fitted.prior = est_mixprop_mode(sehat=abs(rnorm(100)),g=igmix(c(.5,.5),c(1,3),c(1,3)),
+#' prior=c(1,1),df=10,unimodal="variance",singlecomp=FALSE,estpriormode=TRUE)
 #' 
 #' @export
 #' 
@@ -302,13 +311,19 @@ IGmixEM = function(sehat, v, c.init, alpha.vec, pi.init, prior, unimodal,singlec
 }
 
 
-#' @title Estimate the single component inverse-gamma prior by matching the moments
-#' @description Estimate the single component inverse-gamma prior by matching the moments.
+#' @title Estimate the single component inverse-gamma prior of variances by matching the moments
+#' @description Suppose the true variances come from a single component inverse-gamma prior, and 
+#' standard errors (noisy estimates of the square root of true variances) are observed.
+#' This function estimates the single component inverse-gamma prior of variances by matching the moments. 
 #'
 #' @param sehat n vector of standard errors of observations
 #' @param df degrees of freedom for chi-square distribution of sehat^2
 #' 
 #' @return The shape (a) and rate (b) of the fitted inverse-gamma prior 
+#' @examples 
+#' sd = sqrt(1/rgamma(100,5,5)) #true prior: IG(5,5)
+#' sehat = sqrt(sd^2*rchisq(100,7)/7) 
+#' est_singlecomp_mm(sehat=sehat,df=7) 
 #' 
 #' @export
 #' 
@@ -519,10 +534,18 @@ post.igmix = function(m,betahat,sebetahat,v){
 #' 
 #' @param betahat a p vector of observed effect sizes
 #' @param se a p*k matrix of moderated standard errors
-#' @param pi a p*k matrix of mixture proportions
+#' @param pi a p*k matrix of mixture proportions, row sums are 1.
 #' @param df a p*k matrix of degrees of freedom
 #'
 #' @return A p vector of p-values testing if the effect sizes are 0. 
+#' 
+#' @examples 
+#' # p=10, k=5
+#' betahat = rnorm(10)
+#' se = matrix(abs(rnorm(10*5)), ncol=5)
+#' pi = matrix(rep(0.2,10*5), ncol=5)
+#' df = matrix(rep(11:15,each=10), ncol=5)
+#' mod_t_test(betahat,se,pi,df)
 #' 
 #' @export
 #' 
@@ -607,7 +630,7 @@ est_prior = function(sehat, df, betahat, randomstart, singlecomp, unimodal,
     if(!is.numeric(prior)){
       if(prior=="nullbiased"){ # set up prior to favour "null"
         prior = rep(1,l)
-        prior[null.comp] = l-1 #prior 10-1 in favour of null by default
+        prior[1] = l-1 #prior 10-1 in favour of null by default
       }else if(prior=="uniform"){
         prior = rep(1,l)
       }
