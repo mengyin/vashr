@@ -3,7 +3,7 @@ Author: Mengyin Lu, Matthew Stephens
 Maintainer: Mengyin Lu <mengyin@uchicago.edu>
 Type: Package
 Title: Variance Adaptive Shrinkage
-Version: 0.99.0
+Version: 0.99.1
 Date: 2016-6-10
 Description: The main function in the vashr package is \code{\link{vash}}, which
     should be examined for more details. 

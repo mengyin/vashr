@@ -1,4 +1,5 @@
 #' @import ashr qvalue SQUAREM
+#' @importFrom stats optim pt rgamma
 #' @title  Main Variance Adaptive SHrinkage function
 #'
 #' @description Takes vectors of standard errors (sehat), and applies shrinkage to them, using Empirical Bayes methods, to compute shrunk estimates for variances.
@@ -126,7 +127,9 @@ vash = function(sehat, df,
   # compute posterior distribution
   post.se = post.igmix(mix.fit$g,rep(numeric(0),n),sehat[completeobs],df)
   postpi.se = t(matrix(rep(mix.fit$g$pi,length(sehat)),ncol=length(sehat)))
-  postpi.se[completeobs,] = t(comppostprob(mix.fit$g,rep(numeric(0),n),sehat[completeobs],df))
+  #postpi.se[completeobs,] = t(comppostprob(mix.fit$g,rep(numeric(0),n),sehat[completeobs],df))
+  data = list(x=rep(numeric(0),n), s=sehat[completeobs], v=df)
+  postpi.se[completeobs,] = t(comp_postprob(mix.fit$g, data = data))
   
   PosteriorMean.se = rep(mix.fit$g$c,length=length(sehat))
   
@@ -587,6 +590,7 @@ est_prior = function(sehat, df, betahat, randomstart, singlecomp, unimodal,
   # Set up initial parameters
   if(!is.null(g)){
     maxiter = 1 # if g is specified, don't iterate the EM
+    estpriormode = FALSE
     prior = rep(1,length(g$pi)) #prior is not actually used if g specified, but required to make sure EM doesn't produce warning
     l = length(g$pi)
   } else {   
